@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific
+email_config.json
+anomaly_history.db
+static/videos/*.avi
+static/videos/*.mp4
+yolo11*.pt
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

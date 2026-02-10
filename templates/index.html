@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Anomaly Detection</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header class="header slide-in">
+            <h1>CCTV Anomaly Detection</h1>
+            <p>AI-powered video analysis using YOLOv8 + OpenVINO & ByteTrack</p>
+        </header>
+
+        <nav class="nav">
+            <button class="nav-btn active" onclick="showTab('analyze')">Analyze Video</button>
+            <button class="nav-btn" onclick="showTab('history')">History Log</button>
+            <a href="/live" class="nav-link">Live Stream &#128308;</a>
+        </nav>
+
+        <!-- Analyze Tab -->
+        <div id="analyze-tab" class="tab-content active fade-in">
+            <div class="upload-card glass">
+                <div class="upload-icon-wrapper">
+                    &#128249;
+                </div>
+                <h2>Upload Video for Analysis</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 32px;">
+                    Supports MP4, AVI, MOV. Optimized for anomaly detection.
+                </p>
+
+                <div class="file-input-wrapper">
+                    <input type="file" id="videoFile" class="file-input" accept="video/*" onchange="updateFileName()">
+                    <label for="videoFile" class="file-label">
+                        <span style="font-size: 24px; margin-bottom: 12px;">&#128194;</span>
+                        <span>Click to browse or drag video here</span>
+                        <div id="fileName" style="margin-top: 12px; color: var(--text-accent); font-weight: 500;"></div>
+                    </label>
+                </div>
+
+                <div class="settings-row">
+                    <div class="control-group">
+                        <label>Crowd Threshold</label>
+                        <select id="crowdThreshold">
+                            <option value="2">2+ people</option>
+                            <option value="3">3+ people</option>
+                            <option value="5" selected>5+ people</option>
+                            <option value="10">10+ people</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" onclick="uploadVideo()">
+                    Start Analysis &#128640;
+                </button>
+            </div>
+
+            <div id="loading" class="loading" style="display: none; text-align: center; margin-top: 48px;">
+                <div class="loading-spinner"></div>
+                <p style="margin-top: 16px; color: var(--text-accent); font-weight: 500;">Analyzing video
+                    frame-by-frame...</p>
+                <div class="progress-container" style="max-width: 400px; margin: 24px auto;">
+                    <div id="progressBar" class="progress-bar"></div>
+                </div>
+                <div id="progressText" class="progress-text">0%</div>
+                <div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
+                    (First run may take ~1 min for OpenVINO export)
+                </div>
+            </div>
+
+            <div id="results" class="results" style="display: none;">
+                <div class="header" style="margin: 32px 0 16px; text-align: left;">
+                    <h3 style="font-size: 24px;">Analysis Results</h3>
+                </div>
+
+                <div id="metrics" class="results-grid"></div>
+
+                <div id="anomaly-tags" class="flex-center" style="gap: 12px; flex-wrap: wrap; margin-bottom: 24px;">
+                </div>
+
+                <div id="video-container" class="video-wrapper" style="display: none;">
+                    <video id="annotated-video" controls></video>
+                    <div style="padding: 16px; background: rgba(0,0,0,0.5); display: flex; justify-content: flex-end;">
+                        <button class="btn btn-secondary btn-sm" onclick="downloadVideo()">Download Result
+                            &#128229;</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history-tab" class="tab-content fade-in" style="display: none;">
+            <div class="glass" style="padding: 24px; border-radius: var(--radius-lg); margin-bottom: 24px;">
+                <div class="settings-row" style="justify-content: flex-start;">
+                    <input type="text" id="search-filename" placeholder="Search filename..." style="flex: 1;">
+                    <select id="filter-rate">
+                        <option value="">All Risk Levels</option>
+                        <option value="0.5">High Risk (>50%)</option>
+                        <option value="0.25">Medium Risk (>25%)</option>
+                    </select>
+                    <button class="btn btn-primary btn-sm" onclick="loadHistory()">Filter</button>
+                    <button class="btn btn-secondary btn-sm" onclick="clearFilters()">Clear</button>
+                </div>
+            </div>
+
+            <div id="history-loading" class="loading" style="display: none; text-align: center;">
+                <div class="loading-spinner"></div>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Filename</th>
+                            <th>Date</th>
+                            <th>Duration</th>
+                            <th>Features</th>
+                            <th>Risk Score</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching logic
+        function showTab(tabName) {
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            // Hide all tabs
+            document.getElementById('analyze-tab').style.display = 'none';
+            document.getElementById('history-tab').style.display = 'none';
+
+            // Activate selected
+            event.target.classList.add('active');
+            const selectedTab = document.getElementById(tabName + '-tab');
+            selectedTab.style.display = 'block';
+            selectedTab.classList.add('fade-in');
+
+            if (tabName === 'history') loadHistory();
+        }
+
+        let currentVideoUrl = null;
+
+        function updateFileName() {
+            const input = document.getElementById('videoFile');
+            const display = document.getElementById('fileName');
+            display.textContent = input.files[0]?.name || '';
+        }
+
+        async function uploadVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a video file');
+                return;
+            }
+
+            // Reset UI
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressText').textContent = '0%';
+
+            document.getElementById('loading').scrollIntoView({ behavior: 'smooth' });
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const crowdThreshold = document.getElementById('crowdThreshold').value;
+                // Start async task
+                const response = await fetch(`/analyze-yolo?crowd_threshold=${crowdThreshold}&confidence=0.5`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.task_id) {
+                    pollTaskStatus(data.task_id);
+                } else {
+                    alert('Error: ' + (data.detail || 'Failed to start analysis'));
+                    document.getElementById('loading').style.display = 'none';
+                }
+            } catch (error) {
+                alert('Connection Error: ' + error.message);
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        async function pollTaskStatus(taskId) {
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/tasks/${taskId}`);
+                    const task = await response.json();
+
+                    if (task.status === 'processing' || task.status === 'queued') {
+                        const progress = task.progress || 0;
+                        document.getElementById('progressBar').style.width = progress + '%';
+                        document.getElementById('progressText').textContent = progress + '%';
+                    } else if (task.status === 'completed') {
+                        clearInterval(pollInterval);
+                        document.getElementById('progressBar').style.width = '100%';
+                        document.getElementById('progressText').textContent = '100%';
+
+                        setTimeout(() => {
+                            document.getElementById('loading').style.display = 'none';
+                            displayResults(task.result);
+                        }, 500);
+                    } else if (task.status === 'failed') {
+                        clearInterval(pollInterval);
+                        alert('Analysis Failed: ' + task.error);
+                        document.getElementById('loading').style.display = 'none';
+                    }
+                } catch (e) {
+                    console.error("Polling error", e);
+                }
+            }, 1000);
+        }
+
+        function displayResults(result) {
+            const metricsDiv = document.getElementById('metrics');
+            const hasAnomalies = (result.anomaly_frames || 0) > 0;
+
+            // Format metrics with units and styles
+            metricsDiv.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-label">Total Frames</div>
+                    <div class="metric-value">${result.total_frames || result.frame_count}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Anomalies Detected</div>
+                    <div class="metric-value ${hasAnomalies ? 'danger' : 'success'}">${result.anomaly_frames || 0}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Risk Level</div>
+                    <div class="metric-value ${(result.anomaly_rate > 0.1) ? 'danger' : 'success'}">${(result.anomaly_rate * 100).toFixed(1)}%</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Max Crowd</div>
+                    <div class="metric-value accent">${result.max_people_detected || 0} <span style="font-size:14px">ppl</span></div>
+                </div>
+            `;
+
+            const tagsDiv = document.getElementById('anomaly-tags');
+            if (result.anomaly_types && Object.keys(result.anomaly_types).length > 0) {
+                tagsDiv.innerHTML = Object.entries(result.anomaly_types)
+                    .map(([type, count]) => `<span class="badge badge-danger">&#9888; ${type} (${count})</span>`)
+                    .join('');
+            } else {
+                tagsDiv.innerHTML = '<span class="badge badge-success">&#9989; No Anomalies Detected</span>';
+            }
+
+            if (result.annotated_video_url) {
+                currentVideoUrl = result.annotated_video_url;
+                const videoEl = document.getElementById('annotated-video');
+                videoEl.src = result.annotated_video_url;
+                document.getElementById('video-container').style.display = 'block';
+                // Auto play
+                videoEl.play().catch(e => console.log("Auto-play prevented"));
+            }
+
+            document.getElementById('results').style.display = 'block';
+            document.getElementById('results').classList.add('fade-in');
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function downloadVideo() {
+            if (currentVideoUrl) {
+                const a = document.createElement('a');
+                a.href = currentVideoUrl;
+                a.download = 'analysis_result_optimized.avi';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        }
+
+        async function loadHistory() {
+            const tbody = document.getElementById('history-body');
+            document.getElementById('history-loading').style.display = 'block';
+            tbody.innerHTML = '';
+
+            const filename = document.getElementById('search-filename').value;
+            const minRate = document.getElementById('filter-rate').value;
+
+            let url = '/history?';
+            if (filename) url += `filename=${encodeURIComponent(filename)}&`;
+            if (minRate) url += `min_anomaly_rate=${minRate}&`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 40px; color: var(--text-secondary);">No records found</td></tr>';
+                } else {
+                    tbody.innerHTML = data.map(v => {
+                        const rate = v.anomaly_rate || 0;
+                        const badgeClass = rate > 0.5 ? 'badge-danger' : rate > 0.25 ? 'badge-warning' : 'badge-success';
+                        const date = new Date(v.upload_time).toLocaleDateString();
+                        const time = new Date(v.upload_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                        return `
+                            <tr>
+                                <td>#${v.id}</td>
+                                <td style="font-weight:500; color:white;">${v.filename}</td>
+                                <td style="color: var(--text-secondary);">${date} <small>${time}</small></td>
+                                <td>${v.frame_count} f</td>
+                                <td>${v.anomaly_count} events</td>
+                                <td><span class="badge ${badgeClass}">${(rate * 100).toFixed(0)}%</span></td>
+                                <td class="actions" style="display:flex; gap:8px;">
+                                    ${v.output_video_path ? `<button class="btn btn-secondary btn-sm" onclick="viewVideo(${v.id})">&#9654; Play</button>` : ''}
+                                    <button class="btn btn-danger btn-sm" onclick="deleteVideo(${v.id})">&#128465;</button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+            document.getElementById('history-loading').style.display = 'none';
+        }
+
+        async function viewVideo(videoId) {
+            try {
+                const response = await fetch(`/history/${videoId}`);
+                const data = await response.json();
+                if (data.output_video_path) {
+                    // Handle both forward and backward slashes for Windows paths
+                    const filename = data.output_video_path.replace(/\\/g, '/').split('/').pop();
+                    window.open(`/static/videos/${filename}`, '_blank');
+                }
+            } catch (error) {
+                alert('Error loading video path');
+            }
+        }
+
+        async function deleteVideo(videoId) {
+            if (!confirm('Are you sure you want to delete this analysis record?')) return;
+            try {
+                const response = await fetch(`/history/${videoId}`, { method: 'DELETE' });
+                if (response.ok) loadHistory();
+            } catch (error) {
+                alert('Error deleting');
+            }
+        }
+
+        function clearFilters() {
+            document.getElementById('search-filename').value = '';
+            document.getElementById('filter-rate').value = '';
+            loadHistory();
+        }
+    </script>
+</body>
+
+</html>

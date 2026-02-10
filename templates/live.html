@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Stream - Anomaly Detection</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* live specific overrides not in main css */
+        .stream-video {
+            aspect-ratio: 16/9;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .stream-video img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .stream-placeholder {
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            margin-right: 6px;
+        }
+
+        .status-dot.live {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.alert {
+            background: var(--danger);
+            box-shadow: 0 0 10px var(--danger);
+            animation: pulse 0.5s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        /* Toast Alert */
+        .toast-alert {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--danger);
+            border-left: 4px solid var(--danger);
+            padding: 16px 24px;
+            border-radius: var(--radius-md);
+            backdrop-filter: blur(12px);
+            z-index: 1000;
+            transform: translateX(150%);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toast-alert.show {
+            transform: translateX(0);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>&#128308; Live Stream Monitor</h1>
+            <nav class="nav">
+                <a href="/" class="nav-link">&#8592; Return to Dashboard</a>
+            </nav>
+        </header>
+
+        <!-- Toast Alert -->
+        <div id="toast-alert" class="toast-alert">
+            <span style="font-size: 24px;">&#128680;</span>
+            <div>
+                <div style="font-weight: 700; color: var(--danger);">ANOMALY DETECTED</div>
+                <div id="alert-detail" style="font-size: 13px; color: var(--text-secondary);">Traffic Incident</div>
+            </div>
+            <button class="btn btn-sm btn-secondary" onclick="dismissAlert()"
+                style="margin-left: 12px;">Dismiss</button>
+        </div>
+
+        <div class="glass" style="padding: 24px; border-radius: var(--radius-lg); margin-bottom: 32px;">
+            <div class="settings-row">
+                <div class="control-group">
+                    <label>Video Source</label>
+                    <select id="sourceType" onchange="updateSourceInput()">
+                        <option value="webcam">Webcam Device</option>
+                        <option value="rtsp">RTSP / IP Camera</option>
+                        <option value="http">HTTP Stream</option>
+                    </select>
+                </div>
+
+                <div class="control-group" id="webcamSelect">
+                    <label>Select Camera</label>
+                    <select id="cameraIndex">
+                        <option value="0">Camera 0 (Default)</option>
+                        <option value="1">Camera 1 (External)</option>
+                    </select>
+                </div>
+
+                <div class="control-group" id="urlInput" style="display:none;">
+                    <label>Stream URL</label>
+                    <input type="text" id="streamUrl" placeholder="rtsp://user:pass@ip:554/stream"
+                        style="width: 300px;">
+                </div>
+
+                <div class="control-group">
+                    <label>Sensitivity</label>
+                    <select id="threshold">
+                        <option value="2">High (2+ People)</option>
+                        <option value="3" selected>Medium (3+ People)</option>
+                        <option value="5">Low (5+ People)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="flex-center" style="gap: 16px;">
+                <button id="startBtn" class="btn btn-primary" onclick="startStream()">Start Monitoring &#9654;</button>
+                <button id="stopBtn" class="btn btn-danger" onclick="stopStream()" style="display:none;">Stop Stream
+                    &#9209;</button>
+            </div>
+        </div>
+
+        <div class="stream-grid">
+            <div class="stream-card glass">
+                <div class="stream-header flex-between">
+                    <div class="flex-center">
+                        <span id="status-dot" class="status-dot"></span>
+                        <span id="status-text"
+                            style="font-weight: 600; font-size: 14px; color: var(--text-secondary);">Offline</span>
+                    </div>
+                    <span class="badge badge-warning" style="font-size: 11px;">CAM-01</span>
+                </div>
+
+                <div class="stream-video">
+                    <img id="stream-img" style="display:none;">
+                    <div id="placeholder" class="stream-placeholder">
+                        <div style="font-size: 48px; opacity: 0.2; margin-bottom: 16px;">&#128249;</div>
+                        Waiting for stream...
+                    </div>
+                </div>
+
+                <div
+                    style="display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--border-glass);">
+                    <div style="padding: 16px; text-align: center; border-right: 1px solid var(--border-glass);">
+                        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary);">FPS</div>
+                        <div id="stat-fps" style="font-weight: 700; color: var(--text-primary);">0</div>
+                    </div>
+                    <div style="padding: 16px; text-align: center; border-right: 1px solid var(--border-glass);">
+                        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary);">People
+                        </div>
+                        <div id="stat-people" style="font-weight: 700; color: var(--text-accent);">0</div>
+                    </div>
+                    <div style="padding: 16px; text-align: center; border-right: 1px solid var(--border-glass);">
+                        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary);">Vehicles
+                        </div>
+                        <div id="stat-vehicles" style="font-weight: 700; color: var(--text-primary);">0</div>
+                    </div>
+                    <div style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary);">Status
+                        </div>
+                        <div id="stat-status" style="font-weight: 700; color: var(--success);">OK</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isStreaming = false;
+        let statusInterval = null;
+
+        function updateSourceInput() {
+            const type = document.getElementById('sourceType').value;
+            document.getElementById('webcamSelect').style.display = type === 'webcam' ? 'flex' : 'none';
+            document.getElementById('urlInput').style.display = type !== 'webcam' ? 'flex' : 'none';
+        }
+
+        async function startStream() {
+            const type = document.getElementById('sourceType').value;
+            const threshold = document.getElementById('threshold').value;
+            const btn = document.getElementById('startBtn');
+            const originalText = btn.innerHTML;
+
+            btn.innerHTML = 'Connecting...';
+            btn.disabled = true;
+
+            let source;
+            if (type === 'webcam') {
+                source = document.getElementById('cameraIndex').value;
+            } else {
+                source = document.getElementById('streamUrl').value;
+                if (!source) {
+                    alert('Please enter stream URL');
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    return;
+                }
+            }
+
+            try {
+                const response = await fetch('/live/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        stream_id: 'main',
+                        source: source,
+                        crowd_threshold: parseInt(threshold)
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    isStreaming = true;
+                    document.getElementById('startBtn').style.display = 'none';
+                    document.getElementById('stopBtn').style.display = 'block';
+                    document.getElementById('placeholder').style.display = 'none';
+                    document.getElementById('stream-img').style.display = 'block';
+                    document.getElementById('stream-img').src = '/live/feed/main?' + Date.now();
+
+                    document.getElementById('status-dot').className = 'status-dot live';
+                    document.getElementById('status-text').textContent = 'LIVE';
+                    document.getElementById('status-text').style.color = 'var(--success)';
+
+                    // Start status updates
+                    statusInterval = setInterval(updateStatus, 1000);
+                } else {
+                    alert('Failed to start: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Connection Error: ' + error.message);
+            }
+
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+
+        async function stopStream() {
+            try {
+                await fetch('/live/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stream_id: 'main' })
+                });
+            } catch (e) { }
+
+            isStreaming = false;
+            document.getElementById('startBtn').style.display = 'block';
+            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('placeholder').style.display = 'flex';
+            document.getElementById('stream-img').style.display = 'none';
+
+            document.getElementById('status-dot').className = 'status-dot';
+            document.getElementById('status-text').textContent = 'OFFLINE';
+            document.getElementById('status-text').style.color = 'var(--text-secondary)';
+
+            if (statusInterval) {
+                clearInterval(statusInterval);
+                statusInterval = null;
+            }
+        }
+
+        async function updateStatus() {
+            if (!isStreaming) return;
+
+            try {
+                const response = await fetch('/live/status/main');
+                const data = await response.json();
+
+                document.getElementById('stat-fps').textContent = data.fps || 0;
+                document.getElementById('stat-people').textContent = data.person_count || 0;
+                document.getElementById('stat-vehicles').textContent = data.vehicle_count || 0;
+
+                const statusEl = document.getElementById('stat-status');
+                const dotEl = document.getElementById('status-dot');
+
+                if (data.is_anomaly) {
+                    statusEl.textContent = 'ALERT';
+                    statusEl.style.color = 'var(--danger)';
+                    dotEl.className = 'status-dot alert';
+                    showAlert(data.anomaly_types);
+                } else {
+                    statusEl.textContent = 'OK';
+                    statusEl.style.color = 'var(--success)';
+                    dotEl.className = 'status-dot live';
+                }
+            } catch (e) { }
+        }
+
+        function showAlert(types) {
+            const toast = document.getElementById('toast-alert');
+            document.getElementById('alert-detail').textContent = types.join(', ');
+            toast.classList.add('show');
+
+            // Auto hide after 5s
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 5000);
+        }
+
+        function dismissAlert() {
+            document.getElementById('toast-alert').classList.remove('show');
+        }
+    </script>
+</body>
+
+</html>
