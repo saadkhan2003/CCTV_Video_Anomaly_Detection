@@ -35,6 +35,7 @@ python-jose[cryptography]>=3.3.0
 
 # Production
 gunicorn>=21.0.0
+openvino>=2024.0.0
 
 # Development and testing
 pytest>=7.0.0

@@ -20,6 +20,7 @@ anomaly_history.db
 static/videos/*.avi
 static/videos/*.mp4
 yolo11*.pt
+yolo11*_openvino_model/
 
 # Logs
 *.log
