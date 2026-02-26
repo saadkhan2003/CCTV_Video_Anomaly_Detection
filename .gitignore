@@ -21,6 +21,7 @@ static/videos/*.avi
 static/videos/*.mp4
 yolo11*.pt
 yolo11*_openvino_model/
+.env
 
 # Logs
 *.log

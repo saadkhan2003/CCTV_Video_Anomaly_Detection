@@ -105,6 +105,9 @@ def save_video_analysis(
     ))
     
     video_id = cursor.lastrowid
+    if video_id is None:
+        conn.close()
+        raise RuntimeError("Failed to insert video record and retrieve its ID.")
     
     # Insert anomaly events for each frame
     fps = 30  # Assume 30 fps, can be made dynamic

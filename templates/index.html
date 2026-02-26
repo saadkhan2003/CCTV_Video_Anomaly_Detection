@@ -54,7 +54,7 @@
                 </div>
 
                 <button class="btn btn-primary" onclick="uploadVideo()">
-                    Start Analysis &#128640;
+                    Start Analysis
                 </button>
             </div>
 
@@ -277,7 +277,7 @@
             if (currentVideoUrl) {
                 const a = document.createElement('a');
                 a.href = currentVideoUrl;
-                a.download = 'analysis_result_optimized.avi';
+                a.download = 'analysis_result.mp4';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
