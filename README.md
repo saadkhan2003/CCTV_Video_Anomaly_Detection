@@ -36,7 +36,8 @@ A high-performance, AI-powered video anomaly detection system designed for CCTV 
 -   **Responsive Design**: Works on desktop, tablet, and mobile
 -   **Dark Theme**: Eye-friendly glassmorphism UI
 -   **Real-time Updates**: Live stream monitoring with SSE
--   **Intuitive Dashboard**: Easy-to-use video upload and analysis
+-   **Demo Mode Banner**: Shows detected class color legend (Person/Vehicle/Weapon)
+-   **Class Identification Log**: Live feed of detected objects with confidence and track IDs
 
 ### 📧 Alert System
 -   **Email Notifications**: Automated SMTP alerts for anomalies
@@ -47,6 +48,12 @@ A high-performance, AI-powered video anomaly detection system designed for CCTV 
 -   **SQLite Database**: Store analysis results and video metadata
 -   **Search Functionality**: Find videos by name, date, or anomaly type
 -   **Statistics Dashboard**: View aggregate analytics across all videos
+
+### 🧪 Fake Camera Testing Suite
+-   **RTSP Simulation**: Docker-based mediamtx server streaming test videos as live RTSP feeds
+-   **HTTP MJPEG Simulation**: Python server streaming test videos as MJPEG (like cheap IP cams)
+-   **Sample Video Downloader**: Pre-configured free Pexels/Pixabay videos covering all anomaly types
+-   **One-command setup**: Single script to start all fake cameras
 
 ---
 
@@ -72,6 +79,7 @@ Comprehensive documentation is available in the `/docs` folder:
 ### Prerequisites
 
 - **Python**: 3.10 or higher
+- **Docker**: Required for RTSP fake camera testing (optional)
 - **Operating System**: Ubuntu 22.04 / Windows 10+ / macOS 12+
 - **RAM**: 8 GB minimum (16 GB recommended)
 - **Storage**: 10 GB free space
@@ -94,7 +102,6 @@ Comprehensive documentation is available in the `/docs` folder:
     ```bash
     pip install -r requirements.txt
     ```
-    *Note: First installation may take 5-10 minutes to download all dependencies.*
 
 ### First Run
 
@@ -112,9 +119,64 @@ Comprehensive documentation is available in the `/docs` folder:
 3.  **Upload and analyze a video**
     - Navigate to "Analyze" tab
     - Upload video file (MP4, AVI, MOV, MKV)
-    - Set crowd threshold (default: 5)
+    - Set crowd threshold (default: 3)
     - Click "Start Analysis"
     - Monitor progress and view results
+
+---
+
+## 🧪 Testing with Fake Cameras
+
+Test RTSP, IP camera, and HTTP stream modes without a real camera. Requires Docker for RTSP.
+
+### Step 1: Download Sample Test Videos
+
+```bash
+bash test_cameras/download_samples.sh
+```
+
+Downloads free royalty-free videos covering all anomaly types into `static/videos/samples/`:
+
+| Video | Anomaly Type | Source |
+|-------|-------------|--------|
+| `crowd_shibuya_crossing.mp4` | CROWD_GATHERING | Pexels #25947490 |
+| `crowd_st_peters.mp4` | CROWD_GATHERING | Pexels #37834012 |
+| `knife_man_with_knife.mp4` | WEAPON_DETECTED | Pexels #18196283 |
+| `weapon_tactical_soldiers.mp4` | WEAPON_DETECTED | Pexels #29684323 |
+| `fighting_sparring.mp4` | POTENTIAL_CONFLICT | Pexels #6296163 |
+
+If Pexels blocks direct download, open the links in browser and download manually.
+
+### Step 2: Start Fake Cameras
+
+```bash
+# Auto-picks first video from static/videos/samples/
+bash test_cameras/test_streams.sh
+
+# Or specify a specific video
+bash test_cameras/test_streams.sh static/videos/samples/fighting_sparring.mp4
+```
+
+This starts:
+- **RTSP server** on `rtsp://127.0.0.1:8554/camtest` (Docker mediamtx)
+- **HTTP MJPEG server** on `http://127.0.0.1:8080/video.mjpg` (Python)
+
+### Step 3: Start the App and Test
+
+```bash
+# In another terminal
+bash run.sh
+```
+
+Open `http://localhost:8000/live` and paste the URLs:
+
+| Source Type | URL |
+|-------------|-----|
+| **RTSP / IP Camera** | `rtsp://127.0.0.1:8554/camtest` |
+| **HTTP Stream** | `http://127.0.0.1:8080/video.mjpg` |
+| **Webcam** | Select Camera 0 (Default) |
+
+Press `Ctrl+C` in the test_streams terminal to stop all fake cameras.
 
 ---
 
@@ -128,8 +190,8 @@ Comprehensive documentation is available in the `/docs` folder:
 - Max file size: 500 MB (configurable)
 
 **Step 2**: Configure Settings
-- **Crowd Threshold**: Number of people to trigger alert (default: 5)
-- **Confidence**: Detection confidence level 0.0-1.0 (default: 0.6)
+- **Crowd Threshold**: Number of people to trigger alert (default: 3)
+- **Confidence**: Detection confidence level 0.0-1.0 (default: 0.5)
 
 **Step 3**: Start Analysis
 - Click "Start Analysis"
@@ -145,44 +207,63 @@ Comprehensive documentation is available in the `/docs` folder:
 
 **Webcam**:
 1. Go to "Live" tab
-2. Select "Webcam" from dropdown
-3. Click "Start Monitoring"
+2. Select "Webcam Device" from dropdown
+3. Choose camera index (0 = internal laptop camera)
+4. Click "Start Monitoring"
 
 **IP Camera (RTSP)**:
 1. Go to "Live" tab
-2. Select "RTSP Stream"
+2. Select "RTSP / IP Camera"
 3. Enter URL: `rtsp://username:password@ip:port/path`
 4. Click "Start Monitoring"
 
-**Example RTSP URLs**:
+**HTTP Stream**:
+1. Go to "Live" tab
+2. Select "HTTP Stream"
+3. Enter URL: `http://ip:port/video.mjpg`
+4. Click "Start Monitoring"
+
+**Example RTSP URLs for real cameras**:
 ```
 Hikvision: rtsp://admin:password@192.168.1.100:554/Streaming/Channels/101
-Dahua: rtsp://admin:password@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0
-Generic: rtsp://admin:password@192.168.1.102:554/stream1
+Dahua:     rtsp://admin:password@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0
+Generic:   rtsp://admin:password@192.168.1.102:554/stream1
 ```
+
+### What the Live Page Shows
+
+- **Demo Mode Banner**: Color legend — Green = Person, Orange = Vehicle, Red = Weapon
+- **Stats Bar**: FPS, People count, Vehicles count, Weapons count, Status
+- **Class Identification Log**: Real-time list of detected objects with class name, track ID, and confidence
+- **Alert Toast**: Pops up when anomaly threshold is exceeded
 
 ---
 
 ## ⚙️ Configuration
 
-### Basic Configuration
-
-Create a `.env` file in the project root:
+### Environment Variables (.env)
 
 ```bash
-# Model Configuration
+# YOLO Model Configuration
 MODEL_SIZE=s          # n, s, m, l, x (s recommended)
 DEVICE=cpu            # cpu, cuda, mps
 CONFIDENCE_THRESHOLD=0.5
 
 # Anomaly Thresholds
-CROWD_THRESHOLD=5
+CROWD_THRESHOLD=3
 LOITER_THRESHOLD=10.0
 
-# Server Configuration
+# Live stream timeout (ms) - increase for slow networks / flaky IP cameras
+STREAM_OPEN_TIMEOUT_MS=10000
+STREAM_READ_TIMEOUT_MS=10000
+
+# Server config
 HOST=0.0.0.0
 PORT=8000
-DEBUG=false
+
+# Fake camera test ports (used by test_cameras/)
+RTSP_PORT=8554
+HTTP_CAM_PORT=8080
 ```
 
 ### Email Alerts
@@ -216,27 +297,33 @@ cctv-anomaly-detection/
 ├── requirements.txt            # Python dependencies
 ├── run.sh                      # Launch script
 ├── .env                        # Environment configuration
-├── email_config.json          # Email alert settings
+├── email_config.json           # Email alert settings
 │
-├── src/                       # Source code
-│   ├── detection/             # Detection and tracking
-│   │   ├── yolo_detector.py   # YOLO detection logic
-│   │   ├── visualization.py   # Bounding box drawing
-│   │   └── live_stream.py     # Live stream processing
-│   ├── storage/               # Data persistence
-│   │   └── database.py        # SQLite operations
-│   └── alerts/                # Alert system
-│       └── email_alerts.py    # Email notifications
+├── src/                        # Source code
+│   ├── detection/              # Detection and tracking
+│   │   ├── yolo_detector.py    # YOLO detection + anomaly rules
+│   │   ├── visualization.py    # Bounding box drawing
+│   │   └── live_stream.py      # Live stream processing
+│   ├── storage/                # Data persistence
+│   │   └── database.py         # SQLite operations
+│   └── alerts/                 # Alert system
+│       └── email_alerts.py     # Email notifications
 │
-├── static/                    # Static web assets
-│   ├── style.css              # UI styles (glassmorphism)
-│   └── videos/                # Processed output videos
+├── static/                     # Static web assets
+│   ├── style.css               # UI styles (glassmorphism)
+│   └── videos/                 # Processed output videos
+│       └── samples/            # Test videos for fake cameras
 │
-├── templates/                 # HTML templates
-│   ├── index.html             # Main dashboard
-│   └── live.html              # Live stream page
+├── templates/                  # HTML templates
+│   ├── index.html              # Main dashboard
+│   └── live.html               # Live stream page
 │
-├── docs/                      # Documentation
+├── test_cameras/               # Fake camera testing suite
+│   ├── test_streams.sh         # Start RTSP + HTTP fake cameras
+│   ├── httpcam.py              # HTTP MJPEG camera server
+│   └── download_samples.sh     # Download free test videos
+│
+├── docs/                       # Documentation
 │   ├── API_DOCUMENTATION.md
 │   ├── USER_MANUAL.md
 │   ├── CONFIGURATION_GUIDE.md
@@ -246,13 +333,13 @@ cctv-anomaly-detection/
 │   ├── MAINTENANCE_GUIDE.md
 │   └── PROJECT_CLOSURE.md
 │
-├── tests/                     # Test suite
+├── tests/                      # Test suite
 │   ├── test_detection.py
 │   ├── test_database.py
 │   ├── test_api.py
 │   └── test_email_alerts.py
 │
-└── yolo11*.pt                 # YOLO model files
+└── yolo11*.pt                  # YOLO model files
 ```
 
 ---
@@ -288,8 +375,12 @@ GET /api/search?query=...
 # Get statistics
 GET /api/statistics
 
-# Live stream
-GET /api/live-stream?source=...
+# Live stream controls
+POST /live/start      # Start stream {source, stream_id, crowd_threshold}
+POST /live/stop       # Stop stream {stream_id}
+GET  /live/feed/{id}  # MJPEG video feed
+GET  /live/status/{id}# Stream status (fps, counts, anomaly types)
+GET  /live/cameras    # Detect available cameras
 ```
 
 For complete API documentation, see [API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md).
@@ -394,6 +485,26 @@ vlc rtsp://admin:password@192.168.1.100:554/stream1
 
 # Check network connectivity
 ping 192.168.1.100
+
+# Increase timeout in .env
+STREAM_OPEN_TIMEOUT_MS=15000
+STREAM_READ_TIMEOUT_MS=15000
+```
+
+**Issue**: RTSP stream won't connect
+```bash
+# Increase timeout in .env
+STREAM_OPEN_TIMEOUT_MS=20000
+
+# Test with fake camera first
+bash test_cameras/test_streams.sh
+```
+
+**Issue**: Public RTSP test streams don't work
+```bash
+# Public RTSP demos are unreliable — use the fake camera suite instead
+bash test_cameras/download_samples.sh
+bash test_cameras/test_streams.sh
 ```
 
 For more troubleshooting, see [USER_MANUAL.md](docs/USER_MANUAL.md#troubleshooting).
@@ -453,6 +564,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Intel** for OpenVINO toolkit
 - **FastAPI** team for excellent web framework
 - **ByteTrack** for tracking algorithm
+- **Docker mediamtx** for RTSP test server
+- **Pexels** for free stock test videos
 - All open-source contributors
 
 ---
@@ -497,7 +610,7 @@ See [PROJECT_CLOSURE.md](docs/PROJECT_CLOSURE.md) for complete roadmap.
 
 **Status**: ✅ Production Ready  
 **Version**: 3.0.0  
-**Last Updated**: March 3, 2026  
+**Last Updated**: August 4, 2026  
 **Maintained**: Yes  
 **Test Coverage**: 85%
 
