@@ -94,6 +94,24 @@
             </nav>
         </header>
 
+        <!-- Demo Mode Banner -->
+        <div class="glass" style="padding: 12px 24px; border-radius: var(--radius-md); margin-bottom: 20px; background: linear-gradient(90deg, rgba(59,130,246,0.2), rgba(139,92,246,0.2)); border: 1px solid rgba(59,130,246,0.4);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 20px;">&#127916;</span>
+                    <div>
+                        <div style="font-weight: 700; color: var(--text-primary);">DEMO MODE: CCTV Class Identification</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">Detecting Persons, Vehicles, and Weapon-related objects in real-time</div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; font-size: 13px;">
+                    <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #00ff00;"></span> Person</span>
+                    <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #ffa500;"></span> Vehicle</span>
+                    <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #ff0000;"></span> Weapon</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Toast Alert -->
         <div id="toast-alert" class="toast-alert">
             <span style="font-size: 24px;">&#128680;</span>
@@ -147,7 +165,7 @@
             </div>
         </div>
 
-        <div class="stream-grid">
+        <div class="stream-grid" style="grid-template-columns: 2fr 1fr; gap: 24px;">
             <div class="stream-card glass">
                 <div class="stream-header flex-between">
                     <div class="flex-center">
@@ -167,7 +185,7 @@
                 </div>
 
                 <div
-                    style="display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--border-glass);">
+                    style="display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--border-glass);">
                     <div style="padding: 16px; text-align: center; border-right: 1px solid var(--border-glass);">
                         <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary);">FPS</div>
                         <div id="stat-fps" style="font-weight: 700; color: var(--text-primary);">0</div>
@@ -182,11 +200,33 @@
                         </div>
                         <div id="stat-vehicles" style="font-weight: 700; color: var(--text-primary);">0</div>
                     </div>
+                    <div style="padding: 16px; text-align: center; border-right: 1px solid var(--border-glass);">
+                        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary);">Weapons
+                        </div>
+                        <div id="stat-weapons" style="font-weight: 700; color: var(--danger);">0</div>
+                    </div>
                     <div style="padding: 16px; text-align: center;">
                         <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary);">Status
                         </div>
                         <div id="stat-status" style="font-weight: 700; color: var(--success);">OK</div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Class Identification Log Panel -->
+            <div class="glass" style="padding: 20px; border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 600px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+                    <span style="font-size: 20px;">&#128187;</span>
+                    <h3 style="margin: 0; font-size: 16px; color: var(--text-primary);">Class Identification Log</h3>
+                </div>
+                <div id="detection-log"
+                    style="flex: 1; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: var(--text-secondary);"
+003e
+                    <div style="padding: 12px; text-align: center; opacity: 0.6;">Start stream to see detected classes...</div>
+                </div>
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-glass); font-size: 12px; color: var(--text-secondary);">
+                    <div>YOLOv11 + OpenVINO</div>
+                    <div>ByteTrack Multi-Object Tracking</div>
                 </div>
             </div>
         </div>
@@ -297,6 +337,7 @@
                 document.getElementById('stat-fps').textContent = data.fps || 0;
                 document.getElementById('stat-people').textContent = data.person_count || 0;
                 document.getElementById('stat-vehicles').textContent = data.vehicle_count || 0;
+                document.getElementById('stat-weapons').textContent = data.weapon_count || 0;
 
                 const statusEl = document.getElementById('stat-status');
                 const dotEl = document.getElementById('status-dot');
@@ -311,7 +352,49 @@
                     statusEl.style.color = 'var(--success)';
                     dotEl.className = 'status-dot live';
                 }
+
+                // Update class identification log
+                if (data.detections_summary && data.detections_summary.length > 0) {
+                    updateDetectionLog(data.detections_summary);
+                }
             } catch (e) { }
+        }
+
+        let logEntries = [];
+        const MAX_LOG_ENTRIES = 50;
+
+        function updateDetectionLog(detections) {
+            const logContainer = document.getElementById('detection-log');
+            const now = new Date().toLocaleTimeString();
+
+            detections.forEach(det => {
+                const categoryColor = det.category === 'person' ? '#00ff00' :
+                                      det.category === 'vehicle' ? '#ffa500' :
+                                      det.category === 'weapon' ? '#ff0000' : '#888888';
+                const entry = {
+                    id: det.id || '-',
+                    class: det.class_name,
+                    conf: (det.confidence * 100).toFixed(0),
+                    category: det.category,
+                    color: categoryColor,
+                    time: now
+                };
+                logEntries.unshift(entry);
+                if (logEntries.length > MAX_LOG_ENTRIES) logEntries.pop();
+            });
+
+            logContainer.innerHTML = logEntries.map(e => `
+                <div style="padding: 6px 8px; border-bottom: 1px solid var(--border-glass); display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: ${e.color}; display: inline-block;"></span>
+                        <span style="color: var(--text-primary); font-weight: 600;">${e.class}</span>
+                        <span style="color: var(--text-secondary); font-size: 11px;">ID:${e.id}</span>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary);">
+                        ${e.conf}% · ${e.time}
+                    </div>
+                </div>
+            `).join('');
         }
 
         function showAlert(types) {

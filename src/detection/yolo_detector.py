@@ -250,6 +250,28 @@ class YOLOAnomalyDetector:
 
         return anomalies
 
+    def _get_detections_summary(self, detections: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Build a human-readable summary of all detected classes for demo display.
+        """
+        summary = []
+        for det in detections.get("all_boxes", []):
+            summary.append(
+                {
+                    "class_name": det["class_name"],
+                    "confidence": round(det["confidence"], 2),
+                    "id": det["id"],
+                    "category": "person"
+                    if det["class_id"] == self.PERSON_CLASS
+                    else "vehicle"
+                    if det["class_id"] in self.VEHICLE_CLASSES
+                    else "weapon"
+                    if det["class_id"] in self.WEAPON_CLASSES
+                    else "other",
+                }
+            )
+        return summary
+
     def _check_proximity(
         self, persons: List[Dict], proximity_threshold: int = 150
     ) -> int:
@@ -382,6 +404,8 @@ class YOLOAnomalyDetector:
             **anomalies,
             "person_count": len(detections["persons"]),
             "vehicle_count": len(detections["vehicles"]),
+            "weapon_count": len(detections["weapons"]),
+            "detections_summary": self._get_detections_summary(detections),
         }
 
         # Draw on frame

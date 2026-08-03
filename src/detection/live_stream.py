@@ -175,7 +175,9 @@ class LiveStreamDetector:
             "is_anomaly": self.current_results.get("is_anomaly", False),
             "person_count": self.current_results.get("person_count", 0),
             "vehicle_count": self.current_results.get("vehicle_count", 0),
-            "anomaly_types": self.current_results.get("anomaly_types", [])
+            "weapon_count": self.current_results.get("weapon_count", 0),
+            "anomaly_types": self.current_results.get("anomaly_types", []),
+            "detections_summary": self.current_results.get("detections_summary", []),
         }
 
 
