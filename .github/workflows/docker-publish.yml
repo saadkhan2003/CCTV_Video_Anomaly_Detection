@@ -55,8 +55,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.packages.updatePackageForAuthenticatedUser({
+            await github.request('PATCH /user/packages/{package_type}/{package_name}', {
               package_type: 'container',
               package_name: 'cctv-anomaly-detection',
-              visibility: 'public'
+              visibility: 'public',
+              headers: {
+                'X-GitHub-Api-Version': '2022-11-28'
+              }
             });
