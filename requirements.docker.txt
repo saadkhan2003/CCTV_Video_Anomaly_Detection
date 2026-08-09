@@ -1,7 +1,5 @@
 # Runtime dependencies only. Development, notebook, and plotting packages stay
 # out of the deployment image to keep it practical for local Portainer use.
-torch>=2.0.0
-torchvision>=0.15.0
 opencv-python-headless>=4.8.0
 numpy>=1.21.0
 imageio>=2.31.0

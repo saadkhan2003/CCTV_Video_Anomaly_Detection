@@ -11,7 +11,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.docker.txt ./
-RUN pip install --no-cache-dir -r requirements.docker.txt
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+    && pip install --no-cache-dir -r requirements.docker.txt
 
 COPY . .
 
