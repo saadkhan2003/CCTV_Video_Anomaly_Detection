@@ -8,7 +8,7 @@ of past anomaly detection results.
 
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 import json
 
@@ -87,6 +87,7 @@ def init_database():
     conn.commit()
     conn.close()
     _import_legacy_database()
+    _normalize_legacy_timestamps()
     print("✅ Database initialized successfully!")
 
 
@@ -142,6 +143,22 @@ def _import_legacy_database():
         print(f"Warning: could not import legacy database: {exc}")
     finally:
         legacy_conn.close()
+        conn.close()
+
+
+def _normalize_legacy_timestamps():
+    """Mark SQLite's older timezone-less UTC values as UTC for browsers."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE videos
+            SET upload_time = REPLACE(upload_time, ' ', 'T') || 'Z'
+            WHERE upload_time GLOB '????-??-?? ??:??:??'
+            """
+        )
+        conn.commit()
+    finally:
         conn.close()
 
 
@@ -246,12 +263,13 @@ def save_video_analysis(
     # Insert video record
     cursor.execute('''
         INSERT INTO videos (
-            filename, frame_count, anomaly_count, anomaly_rate,
+            filename, upload_time, frame_count, anomaly_count, anomaly_rate,
             processing_time, threshold_used, output_video_path,
             original_video_path, avg_anomaly_score, max_anomaly_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        filename, frame_count, anomaly_count, anomaly_rate,
+        filename, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        frame_count, anomaly_count, anomaly_rate,
         processing_time, threshold_used, output_video_path,
         original_video_path, avg_score, max_score
     ))

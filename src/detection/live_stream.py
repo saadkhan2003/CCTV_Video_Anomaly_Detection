@@ -48,6 +48,9 @@ class LiveStreamDetector:
         self.is_running = False
         self.current_frame = None
         self.current_results = {}
+        self.live_frame_count = 0
+        self.last_detections: Optional[Dict[str, Any]] = None
+        self.source_fps = 30.0
         self.alert_callback: Optional[Callable] = None
         
         # Alert cooldown (don't spam alerts)
@@ -75,6 +78,10 @@ class LiveStreamDetector:
             if not self.cap.isOpened():
                 logger.error(f"Cannot open source: {self.source}")
                 return False
+
+            reported_fps = self.cap.get(cv2.CAP_PROP_FPS)
+            if reported_fps and reported_fps > 1:
+                self.source_fps = reported_fps
             
             # Test if we can read a frame (with quick timeout)
             self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)  # 5 sec open timeout
@@ -89,6 +96,8 @@ class LiveStreamDetector:
             )
             
             self.is_running = True
+            self.live_frame_count = 0
+            self.last_detections = None
             logger.info(f"Stream started: {self.source}")
             return True
             
@@ -125,9 +134,20 @@ class LiveStreamDetector:
         self.last_frame_time = current_time
         avg_fps = sum(self.fps_buffer) / len(self.fps_buffer)
         
-        # Process with YOLO
+        # Run the general Nano YOLO and specialist weapon models every third frame.
         if self.detector:
-            annotated_frame, results = self.detector.process_frame(frame)
+            run_general_yolo = self.live_frame_count % 3 == 0 or self.last_detections is None
+            source_timestamp = self.live_frame_count / self.source_fps
+            annotated_frame, results = self.detector.process_frame(
+                frame,
+                timestamp=source_timestamp,
+                cached_detections=None if run_general_yolo else self.last_detections,
+            )
+            self.last_detections = {
+                key: list(results.get(key, []))
+                for key in ("persons", "vehicles", "weapons", "other_objects", "all_boxes")
+            }
+            self.live_frame_count += 1
             results["fps"] = round(avg_fps, 1)
             
             # Check for alert

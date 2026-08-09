@@ -90,6 +90,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ============= Task Management =============
 TASKS = {}
+CANCELLED_TASKS = set()
 
 
 def run_analysis_task(
@@ -102,7 +103,10 @@ def run_analysis_task(
 ):
     """Background task wrapper for analysis"""
     try:
-        from detection.yolo_detector import get_yolo_detector
+        from detection.yolo_detector import AnalysisCancelled, get_yolo_detector
+
+        if task_id in CANCELLED_TASKS:
+            raise AnalysisCancelled("Analysis cancelled by user")
 
         TASKS[task_id]["status"] = "processing"
         update_analysis_task(task_id, status="processing")
@@ -119,7 +123,10 @@ def run_analysis_task(
             loiter_threshold_seconds=LOITER_THRESHOLD,
         )
         stats = yolo.process_video(
-            file_path, output_path, progress_callback=update_progress
+            file_path,
+            output_path,
+            progress_callback=update_progress,
+            should_cancel=lambda: task_id in CANCELLED_TASKS,
         )
 
         # Save to DB logic (moved here)
@@ -170,11 +177,18 @@ def run_analysis_task(
         TASKS[task_id].update(status="completed", progress=100, result=result)
         update_analysis_task(task_id, status="completed", progress=100, result=result)
 
+    except AnalysisCancelled as e:
+        logger.info(f"Task cancelled: {task_id}")
+        if os.path.exists(output_path):
+            os.unlink(output_path)
+        TASKS.setdefault(task_id, {}).update(status="cancelled", error=str(e))
+        update_analysis_task(task_id, status="cancelled", error=str(e))
     except Exception as e:
         logger.error(f"Task failed: {e}")
         TASKS.setdefault(task_id, {}).update(status="failed", error=str(e))
         update_analysis_task(task_id, status="failed", error=str(e))
     finally:
+        CANCELLED_TASKS.discard(task_id)
         # Cleanup temp file
         if os.path.exists(file_path):
             os.unlink(file_path)
@@ -263,6 +277,21 @@ async def get_task_status(task_id: str):
     if not task:
         raise HTTPException(404, "Task not found")
     return task
+
+
+@app.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    """Request cancellation of an in-progress video analysis."""
+    task = TASKS.get(task_id) or get_analysis_task(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    if task["status"] not in ("queued", "processing", "cancelling"):
+        raise HTTPException(409, f"Task is already {task['status']}")
+
+    CANCELLED_TASKS.add(task_id)
+    TASKS.setdefault(task_id, {}).update(status="cancelling")
+    update_analysis_task(task_id, status="cancelling")
+    return {"status": "cancelling"}
 
 
 # ============= History Endpoints =============

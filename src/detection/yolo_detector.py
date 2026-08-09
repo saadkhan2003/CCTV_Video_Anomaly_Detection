@@ -17,6 +17,10 @@ import os
 from pathlib import Path
 
 
+class AnalysisCancelled(Exception):
+    """Raised when a user stops an in-progress uploaded-video analysis."""
+
+
 class VideoWriter:
     """Cross-platform video writer using imageio"""
 
@@ -59,7 +63,10 @@ class YOLOAnomalyDetector:
         34,
         76,
     ]  # knife, baseball bat, scissors (often detected as sharp object)
-    WEAPON_CONFIDENCE_THRESHOLD = 0.25
+    # A higher confirmation threshold avoids treating bags and clothing in
+    # crowded scenes as weapons while retaining clear weapon detections.
+    WEAPON_CONFIDENCE_THRESHOLD = 0.60
+    WEAPON_CHECK_INTERVAL_FRAMES = 3
     VEHICLE_CONFIDENCE_THRESHOLD = 0.35
 
     def __init__(
@@ -135,26 +142,18 @@ class YOLOAnomalyDetector:
         self.object_velocities: Dict[int, float] = {}
         self.frame_count = 0
 
-    def detect_objects(self, frame: np.ndarray) -> Dict[str, Any]:
+    def detect_objects(
+        self,
+        frame: np.ndarray,
+        timestamp: Optional[float] = None,
+        cached_detections: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Detect objects in a single frame
 
         Returns:
             Dictionary with detections and anomaly flags
         """
-        # Run YOLO tracking (ByteTrack is built-in and fast)
-        # Start a new ByteTrack sequence for the first frame of each source.
-        # Distant vehicles in CCTV footage are often less distinct than people.
-        # Keep the general threshold for other classes but retain vehicle
-        # candidates down to the vehicle-specific threshold.
-        results = self.model.track(
-            frame,
-            conf=min(self.confidence_threshold, self.VEHICLE_CONFIDENCE_THRESHOLD),
-            persist=self.frame_count > 0,
-            verbose=False,
-            tracker="bytetrack.yaml",
-        )
-
         detections = {
             "persons": [],
             "vehicles": [],
@@ -163,47 +162,71 @@ class YOLOAnomalyDetector:
             "all_boxes": [],
         }
 
-        if len(results) > 0 and results[0].boxes is not None:
-            boxes = results[0].boxes
+        if cached_detections is not None:
+            for key in detections:
+                detections[key] = list(cached_detections.get(key, []))
+        else:
+            # Run YOLO tracking (ByteTrack is built-in and fast).
+            results = self.model.track(
+                frame,
+                conf=min(self.confidence_threshold, self.VEHICLE_CONFIDENCE_THRESHOLD),
+                persist=self.frame_count > 0,
+                verbose=False,
+                tracker="bytetrack.yaml",
+            )
 
-            for i, box in enumerate(boxes):
-                cls = int(box.cls[0])
-                conf = float(box.conf[0])
-                xyxy = box.xyxy[0].cpu().numpy()
-                id = int(box.id[0]) if box.id is not None else -1
-                x1, y1, x2, y2 = map(int, xyxy)
+            if len(results) > 0 and results[0].boxes is not None:
+                boxes = results[0].boxes
 
-                minimum_confidence = (
-                    self.VEHICLE_CONFIDENCE_THRESHOLD
-                    if cls in self.VEHICLE_CLASSES
-                    else self.confidence_threshold
-                )
-                if conf < minimum_confidence:
-                    continue
+                for i, box in enumerate(boxes):
+                    cls = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    xyxy = box.xyxy[0].cpu().numpy()
+                    id = int(box.id[0]) if box.id is not None else -1
+                    x1, y1, x2, y2 = map(int, xyxy)
 
-                detection = {
-                    "class_id": cls,
-                    "class_name": self.model.names[cls],
-                    "confidence": conf,
-                    "bbox": [x1, y1, x2, y2],
-                    "center": ((x1 + x2) // 2, (y1 + y2) // 2),
-                    "id": id,
-                }
+                    minimum_confidence = (
+                        self.VEHICLE_CONFIDENCE_THRESHOLD
+                        if cls in self.VEHICLE_CLASSES
+                        else self.confidence_threshold
+                    )
+                    if conf < minimum_confidence:
+                        continue
 
-                detections["all_boxes"].append(detection)
+                    detection = {
+                        "class_id": cls,
+                        "class_name": self.model.names[cls],
+                        "confidence": conf,
+                        "bbox": [x1, y1, x2, y2],
+                        "center": ((x1 + x2) // 2, (y1 + y2) // 2),
+                        "id": id,
+                    }
 
-                if cls == self.PERSON_CLASS:
-                    detections["persons"].append(detection)
-                elif cls in self.VEHICLE_CLASSES:
-                    detections["vehicles"].append(detection)
-                elif cls in self.WEAPON_CLASSES:
-                    detections["weapons"].append(detection)
-                else:
-                    detections["other_objects"].append(detection)
+                    detections["all_boxes"].append(detection)
 
-        specialist_weapons = self._detect_specialist_weapons(frame)
-        detections["weapons"].extend(specialist_weapons)
-        detections["all_boxes"].extend(specialist_weapons)
+                    if cls == self.PERSON_CLASS:
+                        detections["persons"].append(detection)
+                    elif cls in self.VEHICLE_CLASSES:
+                        detections["vehicles"].append(detection)
+                    elif cls in self.WEAPON_CLASSES:
+                        detections["weapons"].append(detection)
+                    else:
+                        detections["other_objects"].append(detection)
+
+        # Run the specialist weapon model at the same every-third-frame rate
+        # as the general detector, while retaining its last result between checks.
+        if self.frame_count % self.WEAPON_CHECK_INTERVAL_FRAMES == 0:
+            specialist_weapons = self._detect_specialist_weapons(frame)
+            detections["weapons"] = [
+                weapon for weapon in detections["weapons"]
+                if weapon.get("category") != "weapon"
+            ]
+            detections["all_boxes"] = [
+                box for box in detections["all_boxes"]
+                if box.get("category") != "weapon"
+            ]
+            detections["weapons"].extend(specialist_weapons)
+            detections["all_boxes"].extend(specialist_weapons)
 
         return detections
 
@@ -452,6 +475,7 @@ class YOLOAnomalyDetector:
         draw_detections: bool = True,
         fps: float = 30.0,
         timestamp: Optional[float] = None,
+        cached_detections: Optional[Dict[str, Any]] = None,
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
         Process a single frame: detect objects and check anomalies
@@ -465,7 +489,7 @@ class YOLOAnomalyDetector:
             Tuple of (annotated_frame, results_dict)
         """
         # Detect objects
-        detections = self.detect_objects(frame)
+        detections = self.detect_objects(frame, timestamp, cached_detections)
 
         # Check for anomalies
         anomalies = self.check_anomalies(detections, fps, timestamp)
@@ -644,6 +668,7 @@ class YOLOAnomalyDetector:
         input_path: str,
         output_path: str,
         progress_callback: Optional[callable] = None,
+        should_cancel: Optional[callable] = None,
     ) -> Dict[str, Any]:
         """
         Process entire video file
@@ -677,8 +702,15 @@ class YOLOAnomalyDetector:
 
         start_time = time.time()
         frame_num = 0
+        sample_interval_frames = 3
+        last_detections = None
 
         while True:
+            if should_cancel and should_cancel():
+                cap.release()
+                out.release()
+                raise AnalysisCancelled("Analysis cancelled by user")
+
             # Update progress
             if progress_callback and frame_num % 10 == 0:
                 progress = int((frame_num / total_frames) * 100)
@@ -688,28 +720,42 @@ class YOLOAnomalyDetector:
             if not ret:
                 break
 
-            # Process frame (skip frames for speed)
-            if frame_num % 3 == 0:
+            # Analyze every third frame for a practical accuracy/speed balance.
+            if frame_num % sample_interval_frames == 0:
                 annotated_frame, results = self.process_frame(
                     frame, draw_detections=True, fps=fps, timestamp=frame_num / fps
                 )
                 last_results = results
                 last_annotated = annotated_frame
+                last_detections = {
+                    key: list(results.get(key, []))
+                    for key in ("persons", "vehicles", "weapons", "other_objects", "all_boxes")
+                }
             else:
-                # Use last results but update frame count in logic if needed
-                # For visualization, just use the last annotated frame (or draw on current frame with last dets)
-                # To keep it simple and fast, we'll reuse the last detection results
-                if "last_results" in locals():
-                    results = last_results
-                    # Optional: Redraw on new frame if camera moves, but for speed we can just copy
-                    # or better, draw last detections on current frame
-                    annotated_frame = self.draw_annotations(frame, results, results)
+                # Reuse general detections between every-third-frame checks.
+                if last_detections is not None:
+                    annotated_frame, results = self.process_frame(
+                        frame,
+                        draw_detections=True,
+                        fps=fps,
+                        timestamp=frame_num / fps,
+                        cached_detections=last_detections,
+                    )
+                    last_results = results
+                    last_detections = {
+                        key: list(results.get(key, []))
+                        for key in ("persons", "vehicles", "weapons", "other_objects", "all_boxes")
+                    }
                 else:
                     # First frame fallback
                     annotated_frame, results = self.process_frame(
                         frame, draw_detections=True, fps=fps, timestamp=frame_num / fps
                     )
                     last_results = results
+                    last_detections = {
+                        key: list(results.get(key, []))
+                        for key in ("persons", "vehicles", "weapons", "other_objects", "all_boxes")
+                    }
 
             # Update stats
             stats["total_frames"] += 1

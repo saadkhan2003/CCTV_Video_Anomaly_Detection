@@ -69,6 +69,8 @@
                 <div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
                     (First run may take ~1 min for OpenVINO export)
                 </div>
+                <button id="cancelAnalysisButton" class="btn btn-secondary btn-sm" type="button"
+                    style="margin-top: 16px;" onclick="cancelAnalysis()">Cancel Analysis</button>
             </div>
 
             <div id="results" class="results" style="display: none;">
@@ -147,6 +149,9 @@
         }
 
         let currentVideoUrl = null;
+        let taskPollInterval = null;
+        const ACTIVE_ANALYSIS_TASK_KEY = 'cctv-active-analysis-task';
+        const ACTIVE_ANALYSIS_FILENAME_KEY = 'cctv-active-analysis-filename';
 
         function updateFileName() {
             const input = document.getElementById('videoFile');
@@ -154,7 +159,21 @@
             display.textContent = input.files[0]?.name || '';
         }
 
+        function resetCancelButton() {
+            const button = document.getElementById('cancelAnalysisButton');
+            button.disabled = false;
+            button.textContent = 'Cancel Analysis';
+        }
+
         async function uploadVideo() {
+            const activeTaskId = localStorage.getItem(ACTIVE_ANALYSIS_TASK_KEY);
+            if (activeTaskId) {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('results').style.display = 'none';
+                pollTaskStatus(activeTaskId);
+                return;
+            }
+
             const fileInput = document.getElementById('videoFile');
             const file = fileInput.files[0];
 
@@ -168,6 +187,7 @@
             document.getElementById('results').style.display = 'none';
             document.getElementById('progressBar').style.width = '0%';
             document.getElementById('progressText').textContent = '0%';
+            resetCancelButton();
 
             document.getElementById('loading').scrollIntoView({ behavior: 'smooth' });
 
@@ -185,6 +205,8 @@
                 const data = await response.json();
 
                 if (response.ok && data.task_id) {
+                    localStorage.setItem(ACTIVE_ANALYSIS_TASK_KEY, data.task_id);
+                    localStorage.setItem(ACTIVE_ANALYSIS_FILENAME_KEY, file.name);
                     pollTaskStatus(data.task_id);
                 } else {
                     alert('Error: ' + (data.detail || 'Failed to start analysis'));
@@ -197,17 +219,30 @@
         }
 
         async function pollTaskStatus(taskId) {
-            const pollInterval = setInterval(async () => {
+            if (taskPollInterval) clearInterval(taskPollInterval);
+
+            const checkTaskStatus = async () => {
                 try {
                     const response = await fetch(`/tasks/${taskId}`);
+                    if (!response.ok) {
+                        throw new Error('Task not found');
+                    }
                     const task = await response.json();
 
-                    if (task.status === 'processing' || task.status === 'queued') {
+                    if (task.status === 'processing' || task.status === 'queued' || task.status === 'cancelling') {
                         const progress = task.progress || 0;
                         document.getElementById('progressBar').style.width = progress + '%';
                         document.getElementById('progressText').textContent = progress + '%';
+                        if (task.status === 'cancelling') {
+                            const button = document.getElementById('cancelAnalysisButton');
+                            button.disabled = true;
+                            button.textContent = 'Cancelling...';
+                        }
                     } else if (task.status === 'completed') {
-                        clearInterval(pollInterval);
+                        clearInterval(taskPollInterval);
+                        taskPollInterval = null;
+                        localStorage.removeItem(ACTIVE_ANALYSIS_TASK_KEY);
+                        localStorage.removeItem(ACTIVE_ANALYSIS_FILENAME_KEY);
                         document.getElementById('progressBar').style.width = '100%';
                         document.getElementById('progressText').textContent = '100%';
 
@@ -215,16 +250,59 @@
                             document.getElementById('loading').style.display = 'none';
                             displayResults(task.result);
                         }, 500);
-                    } else if (task.status === 'failed') {
-                        clearInterval(pollInterval);
-                        alert('Analysis Failed: ' + task.error);
+                    } else if (task.status === 'failed' || task.status === 'cancelled') {
+                        clearInterval(taskPollInterval);
+                        taskPollInterval = null;
+                        localStorage.removeItem(ACTIVE_ANALYSIS_TASK_KEY);
+                        localStorage.removeItem(ACTIVE_ANALYSIS_FILENAME_KEY);
+                        if (task.status === 'failed') alert('Analysis Failed: ' + task.error);
                         document.getElementById('loading').style.display = 'none';
                     }
                 } catch (e) {
                     console.error("Polling error", e);
+                    clearInterval(taskPollInterval);
+                    taskPollInterval = null;
+                    localStorage.removeItem(ACTIVE_ANALYSIS_TASK_KEY);
+                    localStorage.removeItem(ACTIVE_ANALYSIS_FILENAME_KEY);
+                    document.getElementById('loading').style.display = 'none';
                 }
-            }, 1000);
+            };
+
+            checkTaskStatus();
+            taskPollInterval = setInterval(checkTaskStatus, 1000);
         }
+
+        async function cancelAnalysis() {
+            const taskId = localStorage.getItem(ACTIVE_ANALYSIS_TASK_KEY);
+            if (!taskId) return;
+
+            const button = document.getElementById('cancelAnalysisButton');
+            button.disabled = true;
+            button.textContent = 'Cancelling...';
+            try {
+                const response = await fetch(`/tasks/${taskId}/cancel`, { method: 'POST' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Could not cancel analysis');
+                }
+            } catch (error) {
+                button.disabled = false;
+                button.textContent = 'Cancel Analysis';
+                alert(error.message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const activeTaskId = localStorage.getItem(ACTIVE_ANALYSIS_TASK_KEY);
+            if (!activeTaskId) return;
+
+            document.getElementById('fileName').textContent =
+                localStorage.getItem(ACTIVE_ANALYSIS_FILENAME_KEY) || 'Video analysis in progress';
+            resetCancelButton();
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            pollTaskStatus(activeTaskId);
+        });
 
         function displayResults(result) {
             const metricsDiv = document.getElementById('metrics');
@@ -306,8 +384,12 @@
                     tbody.innerHTML = data.map(v => {
                         const rate = v.anomaly_rate || 0;
                         const badgeClass = rate > 0.5 ? 'badge-danger' : rate > 0.25 ? 'badge-warning' : 'badge-success';
-                        const date = new Date(v.upload_time).toLocaleDateString();
-                        const time = new Date(v.upload_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const timestamp = v.upload_time.includes('T')
+                            ? v.upload_time
+                            : `${v.upload_time.replace(' ', 'T')}Z`;
+                        const uploadedAt = new Date(timestamp);
+                        const date = uploadedAt.toLocaleDateString();
+                        const time = uploadedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
                         return `
                             <tr>
