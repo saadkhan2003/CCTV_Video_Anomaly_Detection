@@ -1,0 +1,16 @@
+.git
+.zed
+venv
+__pycache__
+*.pyc
+*.db
+email_config.json
+.env
+static/videos/annotated
+static/videos/yolo_*.mp4
+static/videos/samples
+static/videos/raw_samples
+sample_videos
+yolov8s-worldv2.pt
+docs
+.tmp

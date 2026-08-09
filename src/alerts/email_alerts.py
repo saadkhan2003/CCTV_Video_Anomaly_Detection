@@ -14,8 +14,10 @@ import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import logging
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 # Config file path for persistence (in project root)
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'email_config.json')
@@ -25,40 +27,43 @@ DEFAULT_CONFIG = {
     "smtp_server": "smtp.gmail.com",
     "smtp_port": 587,
     "sender_email": "",
-    "sender_password": "",
     "admin_emails": [],
     "enabled": False
 }
 
 
-def _load_config() -> Dict[str, Any]:
-    """Load email config from file"""
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                config = json.load(f)
-                # Ensure enabled flag is set correctly
-                config["enabled"] = bool(
-                    config.get("sender_email") and 
-                    config.get("sender_password") and 
-                    config.get("admin_emails")
-                )
-                return config
-        except Exception as e:
-            logger.error(f"Error loading email config: {e}")
-    return DEFAULT_CONFIG.copy()
-
-
 def _save_config(config: Dict[str, Any]):
-    """Save email config to file"""
+    """Save non-secret email settings to disk."""
     try:
-        # Don't save the password in plain text - just save a placeholder
-        save_config = config.copy()
+        save_config = {key: value for key, value in config.items() if key != "sender_password"}
         with open(CONFIG_FILE, 'w') as f:
             json.dump(save_config, f, indent=2)
         logger.info("Email configuration saved")
     except Exception as e:
         logger.error(f"Error saving email config: {e}")
+
+
+def _load_config() -> Dict[str, Any]:
+    """Load persisted settings and take the SMTP password only from the environment."""
+    config = DEFAULT_CONFIG.copy()
+    legacy_password_removed = False
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                saved_config = json.load(f)
+            legacy_password_removed = bool(saved_config.pop("sender_password", ""))
+            config.update(saved_config)
+        except Exception as e:
+            logger.error(f"Error loading email config: {e}")
+
+    config["sender_password"] = os.getenv("EMAIL_SMTP_PASSWORD", "")
+    config["enabled"] = bool(
+        config.get("sender_email") and config["sender_password"] and config.get("admin_emails")
+    )
+    if legacy_password_removed:
+        _save_config(config)
+        logger.warning("Removed legacy SMTP password from email_config.json; set EMAIL_SMTP_PASSWORD instead")
+    return config
 
 
 # Load config on module import
@@ -72,16 +77,17 @@ def configure_email(
     sender_password: str,
     admin_emails: List[str]
 ):
-    """Configure email settings and save to file"""
+    """Configure email settings; the password remains in memory only."""
     global EMAIL_CONFIG
     EMAIL_CONFIG["smtp_server"] = smtp_server
     EMAIL_CONFIG["smtp_port"] = smtp_port
     EMAIL_CONFIG["sender_email"] = sender_email
-    EMAIL_CONFIG["sender_password"] = sender_password
+    EMAIL_CONFIG["sender_password"] = sender_password or os.getenv("EMAIL_SMTP_PASSWORD", "")
     EMAIL_CONFIG["admin_emails"] = admin_emails
-    EMAIL_CONFIG["enabled"] = bool(sender_email and sender_password and admin_emails)
+    EMAIL_CONFIG["enabled"] = bool(
+        sender_email and EMAIL_CONFIG["sender_password"] and admin_emails
+    )
     
-    # Save to file for persistence
     _save_config(EMAIL_CONFIG)
     
     return EMAIL_CONFIG["enabled"]

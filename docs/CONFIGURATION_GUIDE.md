@@ -140,8 +140,8 @@ CONSOLE_LOGGING=true
 # Enable email alerts
 ENABLE_EMAIL_ALERTS=true
 
-# Email configuration file path
-EMAIL_CONFIG_PATH=./email_config.json
+# SMTP password. Provide this through the service environment, not email_config.json.
+EMAIL_SMTP_PASSWORD=your-app-password
 
 # Only send alerts for critical anomalies
 CRITICAL_ALERTS_ONLY=false
@@ -240,15 +240,15 @@ MAX_FILE_SIZE=1000
   "smtp_server": "smtp.gmail.com",
   "smtp_port": 587,
   "sender_email": "security@company.com",
-  "sender_password": "app-password-here",
-  "receiver_emails": [
+  "admin_emails": [
     "security-team@company.com",
     "operations@company.com"
   ],
-  "enable_tls": true,
-  "timeout": 30
+  "enabled": true
 }
 ```
+
+Set `EMAIL_SMTP_PASSWORD` in the process environment. The application deliberately never writes this password to `email_config.json`.
 
 **SMTP Providers**:
 

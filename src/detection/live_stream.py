@@ -85,7 +85,7 @@ class LiveStreamDetector:
             self.detector = YOLOAnomalyDetector(
                 model_size="n",
                 crowd_threshold=self.crowd_threshold,
-                confidence_threshold=self.confidence
+                confidence_threshold=self.confidence,
             )
             
             self.is_running = True

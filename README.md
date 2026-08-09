@@ -268,22 +268,21 @@ HTTP_CAM_PORT=8080
 
 ### Email Alerts
 
-Create `email_config.json`:
+Set the password outside the project files, then create `email_config.json` with non-secret settings:
 
 ```json
 {
     "smtp_server": "smtp.gmail.com",
     "smtp_port": 587,
     "sender_email": "security@company.com",
-    "sender_password": "your-app-password",
-    "receiver_emails": ["admin@example.com", "security@example.com"]
+    "admin_emails": ["admin@example.com", "security@example.com"]
 }
 ```
 
 **Gmail Setup**:
 1. Enable 2-Step Verification
 2. Generate App Password: [Google Account Settings](https://support.google.com/accounts/answer/185833)
-3. Use App Password in config (not your regular password)
+3. Set it as `EMAIL_SMTP_PASSWORD` in the service environment; do not place it in `email_config.json`
 
 For detailed configuration options, see [CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md).
 

@@ -40,7 +40,10 @@ from storage.database import (
     get_video_by_id,
     search_videos,
     delete_video,
-    get_statistics,
+    create_analysis_task,
+    get_analysis_task,
+    mark_interrupted_tasks_failed,
+    update_analysis_task,
 )
 
 # Logging
@@ -52,8 +55,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 VIDEOS_DIR = os.path.join(STATIC_DIR, "videos")
+ANNOTATED_VIDEOS_DIR = os.path.join(VIDEOS_DIR, "annotated")
 
 os.makedirs(VIDEOS_DIR, exist_ok=True)
+os.makedirs(ANNOTATED_VIDEOS_DIR, exist_ok=True)
+
+
+def get_static_video_url(video_path: str) -> str:
+    """Return the browser URL for a video stored below the static directory."""
+    relative_path = os.path.relpath(video_path, STATIC_DIR).replace(os.sep, "/")
+    return f"/static/{relative_path}"
 
 # FastAPI App
 app = FastAPI(
@@ -94,17 +105,18 @@ def run_analysis_task(
         from detection.yolo_detector import get_yolo_detector
 
         TASKS[task_id]["status"] = "processing"
+        update_analysis_task(task_id, status="processing")
 
         def update_progress(p):
             TASKS[task_id]["progress"] = p
+            update_analysis_task(task_id, progress=p)
 
         yolo = get_yolo_detector(
             model_size=MODEL_SIZE,
             device=DEVICE,
-            confidence_threshold=CONFIDENCE_THRESHOLD,
+            confidence_threshold=confidence,
             crowd_threshold=crowd_threshold,
             loiter_threshold_seconds=LOITER_THRESHOLD,
-            confidence=confidence,
         )
         stats = yolo.process_video(
             file_path, output_path, progress_callback=update_progress
@@ -144,9 +156,7 @@ def run_analysis_task(
                 logger.error(f"Email error: {e}")
 
         # Update task result
-        TASKS[task_id]["status"] = "completed"
-        TASKS[task_id]["progress"] = 100
-        TASKS[task_id]["result"] = {
+        result = {
             "video_id": video_id,
             "total_frames": stats["total_frames"],
             "anomaly_frames": stats["anomaly_frames"],
@@ -155,13 +165,15 @@ def run_analysis_task(
             "max_vehicles_detected": stats["max_vehicles"],
             "anomaly_types": stats["anomaly_types_count"],
             "processing_time": stats["processing_time"],
-            "annotated_video_url": f"/static/videos/{os.path.basename(output_path)}",
+            "annotated_video_url": get_static_video_url(output_path),
         }
+        TASKS[task_id].update(status="completed", progress=100, result=result)
+        update_analysis_task(task_id, status="completed", progress=100, result=result)
 
     except Exception as e:
         logger.error(f"Task failed: {e}")
-        TASKS[task_id]["status"] = "failed"
-        TASKS[task_id]["error"] = str(e)
+        TASKS.setdefault(task_id, {}).update(status="failed", error=str(e))
+        update_analysis_task(task_id, status="failed", error=str(e))
     finally:
         # Cleanup temp file
         if os.path.exists(file_path):
@@ -182,6 +194,7 @@ class HealthResponse(BaseModel):
 @app.on_event("startup")
 async def startup():
     init_database()
+    mark_interrupted_tasks_failed()
     logger.info("✅ Application started")
 
 
@@ -225,9 +238,10 @@ async def analyze_yolo(
 
     task_id = str(uuid.uuid4())
     output_filename = f"yolo_{task_id}.mp4"
-    output_path = os.path.join(VIDEOS_DIR, output_filename)
+    output_path = os.path.join(ANNOTATED_VIDEOS_DIR, output_filename)
 
     TASKS[task_id] = {"status": "queued", "progress": 0, "result": None}
+    create_analysis_task(task_id)
 
     background_tasks.add_task(
         run_analysis_task,
@@ -245,7 +259,7 @@ async def analyze_yolo(
 @app.get("/tasks/{task_id}")
 async def get_task_status(task_id: str):
     """Get status of an analysis task"""
-    task = TASKS.get(task_id)
+    task = TASKS.get(task_id) or get_analysis_task(task_id)
     if not task:
         raise HTTPException(404, "Task not found")
     return task
@@ -260,8 +274,14 @@ async def get_history(
 ):
     """Get video analysis history"""
     if filename or min_anomaly_rate:
-        return search_videos(filename=filename, min_anomaly_rate=min_anomaly_rate)
-    return get_all_videos()
+        videos = search_videos(filename=filename, min_anomaly_rate=min_anomaly_rate)
+    else:
+        videos = get_all_videos()
+
+    for video in videos:
+        output_path = video.get("output_video_path")
+        video["output_video_available"] = bool(output_path and os.path.exists(output_path))
+    return videos
 
 
 @app.get("/history/{video_id}")
@@ -270,6 +290,8 @@ async def get_history_item(video_id: int):
     result = get_video_by_id(video_id)
     if not result:
         raise HTTPException(404, "Video not found")
+    if result.get("output_video_path") and os.path.exists(result["output_video_path"]):
+        result["output_video_url"] = get_static_video_url(result["output_video_path"])
     return result
 
 

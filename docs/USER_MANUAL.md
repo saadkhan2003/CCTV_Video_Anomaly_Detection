@@ -487,15 +487,14 @@ Enable email notifications for high-priority anomalies.
 
 #### Step 1: Create Configuration File
 
-Create `email_config.json` in project root:
+Set `EMAIL_SMTP_PASSWORD` in the environment, then create `email_config.json` in the project root:
 
 ```json
 {
   "smtp_server": "smtp.gmail.com",
   "smtp_port": 587,
   "sender_email": "security-system@company.com",
-  "sender_password": "your-app-password",
-  "receiver_emails": [
+  "admin_emails": [
     "security-head@company.com",
     "operations@company.com"
   ]
@@ -509,7 +508,7 @@ For Gmail:
 2. Security → 2-Step Verification
 3. App Passwords → Generate
 4. Copy 16-character password
-5. Use in `email_config.json`
+5. Set it as `EMAIL_SMTP_PASSWORD` for the application service
 
 #### Step 3: Test Email
 

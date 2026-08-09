@@ -221,7 +221,7 @@ FastAPI Backend
 - Database parameterized queries (SQL injection prevention)
 - Environment variable-based configuration (no hardcoded secrets)
 - CORS middleware for origin control
-- Email password stored in separate config file
+- Email password supplied through the service environment and never stored in the config file
 
 **Security Recommendations for Production**:
 - Enable HTTPS/TLS encryption

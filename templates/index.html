@@ -318,7 +318,7 @@
                                 <td>${v.anomaly_count} events</td>
                                 <td><span class="badge ${badgeClass}">${(rate * 100).toFixed(0)}%</span></td>
                                 <td class="actions" style="display:flex; gap:8px;">
-                                    ${v.output_video_path ? `<button class="btn btn-secondary btn-sm" onclick="viewVideo(${v.id})">&#9654; Play</button>` : ''}
+                                    ${v.output_video_available ? `<button class="btn btn-secondary btn-sm" onclick="viewVideo(${v.id})">&#9654; Play</button>` : ''}
                                     <button class="btn btn-danger btn-sm" onclick="deleteVideo(${v.id})">&#128465;</button>
                                 </td>
                             </tr>
@@ -335,10 +335,8 @@
             try {
                 const response = await fetch(`/history/${videoId}`);
                 const data = await response.json();
-                if (data.output_video_path) {
-                    // Handle both forward and backward slashes for Windows paths
-                    const filename = data.output_video_path.replace(/\\/g, '/').split('/').pop();
-                    window.open(`/static/videos/${filename}`, '_blank');
+                if (data.output_video_url) {
+                    window.open(data.output_video_url, '_blank');
                 }
             } catch (error) {
                 alert('Error loading video path');

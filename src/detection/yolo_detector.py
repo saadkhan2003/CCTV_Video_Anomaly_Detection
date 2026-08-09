@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from collections import defaultdict
 import time
 import os
+from pathlib import Path
 
 
 class VideoWriter:
@@ -58,6 +59,8 @@ class YOLOAnomalyDetector:
         34,
         76,
     ]  # knife, baseball bat, scissors (often detected as sharp object)
+    WEAPON_CONFIDENCE_THRESHOLD = 0.25
+    VEHICLE_CONFIDENCE_THRESHOLD = 0.35
 
     def __init__(
         self,
@@ -65,6 +68,7 @@ class YOLOAnomalyDetector:
         confidence_threshold: float = 0.5,
         crowd_threshold: int = 5,
         loiter_threshold_seconds: float = 10.0,
+        enable_loitering: bool = True,
         device: str = "cpu",
     ):
         """
@@ -75,11 +79,13 @@ class YOLOAnomalyDetector:
             confidence_threshold: Minimum detection confidence
             crowd_threshold: Number of people to trigger crowd alert
             loiter_threshold_seconds: Time to trigger loitering alert
+            enable_loitering: Whether stationary people trigger loitering alerts
             device: 'cpu' or 'cuda'
         """
         self.confidence_threshold = confidence_threshold
         self.crowd_threshold = crowd_threshold
         self.loiter_threshold = loiter_threshold_seconds
+        self.enable_loitering = enable_loitering
         self.device = device
 
         # Load YOLO model
@@ -108,12 +114,25 @@ class YOLOAnomalyDetector:
         else:
             print("✅ YOLO model loaded!")
 
-        # Tracking for loitering and velocity
-        self.person_tracks: Dict[int, List[Tuple[float, float, float]]] = defaultdict(
-            list
+        # COCO does not include handguns. Load the local specialist model when
+        # available and report all of its pistol/knife detections as WEAPON.
+        self.weapon_model = None
+        weapon_model_path = (
+            Path(__file__).resolve().parents[2] / "models" / "weapon_detector.pt"
         )
-        self.object_velocities: Dict[int, float] = {}  # Store last calculated velocity
-        self.frame_count = 0
+        if weapon_model_path.exists():
+            try:
+                self.weapon_model = YOLO(str(weapon_model_path))
+                print("Weapon detection model loaded!")
+            except Exception as e:
+                print(f"Weapon detection model unavailable: {e}")
+        else:
+            print(f"Weapon detection model not found: {weapon_model_path}")
+
+        # Tracking for loitering and velocity
+        self.person_tracks: Dict[int, List[Tuple[float, float, float]]] = defaultdict(list)
+        self.person_stationary_since: Dict[int, Tuple[float, Tuple[int, int]]] = {}
+        self.object_velocities: Dict[int, float] = {}
         self.frame_count = 0
 
     def detect_objects(self, frame: np.ndarray) -> Dict[str, Any]:
@@ -124,11 +143,14 @@ class YOLOAnomalyDetector:
             Dictionary with detections and anomaly flags
         """
         # Run YOLO tracking (ByteTrack is built-in and fast)
-        # persist=True is required for tracking to work across frames
+        # Start a new ByteTrack sequence for the first frame of each source.
+        # Distant vehicles in CCTV footage are often less distinct than people.
+        # Keep the general threshold for other classes but retain vehicle
+        # candidates down to the vehicle-specific threshold.
         results = self.model.track(
             frame,
-            conf=self.confidence_threshold,
-            persist=True,
+            conf=min(self.confidence_threshold, self.VEHICLE_CONFIDENCE_THRESHOLD),
+            persist=self.frame_count > 0,
             verbose=False,
             tracker="bytetrack.yaml",
         )
@@ -151,6 +173,14 @@ class YOLOAnomalyDetector:
                 id = int(box.id[0]) if box.id is not None else -1
                 x1, y1, x2, y2 = map(int, xyxy)
 
+                minimum_confidence = (
+                    self.VEHICLE_CONFIDENCE_THRESHOLD
+                    if cls in self.VEHICLE_CLASSES
+                    else self.confidence_threshold
+                )
+                if conf < minimum_confidence:
+                    continue
+
                 detection = {
                     "class_id": cls,
                     "class_name": self.model.names[cls],
@@ -171,10 +201,45 @@ class YOLOAnomalyDetector:
                 else:
                     detections["other_objects"].append(detection)
 
+        specialist_weapons = self._detect_specialist_weapons(frame)
+        detections["weapons"].extend(specialist_weapons)
+        detections["all_boxes"].extend(specialist_weapons)
+
         return detections
 
+    def _detect_specialist_weapons(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Detect guns and knives with the local weapon-specific YOLO model."""
+        if self.weapon_model is None:
+            return []
+
+        results = self.weapon_model.predict(
+            frame, conf=self.WEAPON_CONFIDENCE_THRESHOLD, verbose=False
+        )
+        weapons = []
+        if not results or results[0].boxes is None:
+            return weapons
+
+        for box in results[0].boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+            weapons.append(
+                {
+                    "class_id": -1,
+                    "class_name": "WEAPON",
+                    "confidence": float(box.conf[0]),
+                    "bbox": [x1, y1, x2, y2],
+                    "center": ((x1 + x2) // 2, (y1 + y2) // 2),
+                    "id": -1,
+                    "category": "weapon",
+                }
+            )
+
+        return weapons
+
     def check_anomalies(
-        self, detections: Dict[str, Any], fps: float = 30.0
+        self,
+        detections: Dict[str, Any],
+        fps: float = 30.0,
+        timestamp: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Check for anomalies based on detection results
@@ -191,6 +256,9 @@ class YOLOAnomalyDetector:
 
         person_count = len(detections["persons"])
         vehicle_count = len(detections["vehicles"])
+        loitering_count, running_count = self._track_person_motion(
+            detections["persons"], timestamp if timestamp is not None else time.monotonic()
+        )
 
         # Rule 1: Crowd Gathering (2+ people triggers alert)
         if person_count >= self.crowd_threshold:
@@ -216,6 +284,24 @@ class YOLOAnomalyDetector:
                 )
                 anomalies["risk_level"] = "high"
 
+        if self.enable_loitering and loitering_count:
+            anomalies["is_anomaly"] = True
+            anomalies["anomaly_types"].append("LOITERING")
+            anomalies["anomaly_details"].append(
+                f"Loitering detected: {loitering_count} person(s) stationary for at least {self.loiter_threshold:.0f} seconds"
+            )
+            if anomalies["risk_level"] == "normal":
+                anomalies["risk_level"] = "medium"
+
+        if running_count:
+            anomalies["is_anomaly"] = True
+            anomalies["anomaly_types"].append("FAST_MOVEMENT")
+            anomalies["anomaly_details"].append(
+                f"Fast movement detected: {running_count} person(s)"
+            )
+            if anomalies["risk_level"] == "normal":
+                anomalies["risk_level"] = "medium"
+
         # Rule 3: Multiple vehicles (potential traffic issue)
         if vehicle_count >= 3:
             anomalies["is_anomaly"] = True
@@ -232,7 +318,7 @@ class YOLOAnomalyDetector:
             weapon_names = [w["class_name"] for w in detections["weapons"]]
             anomalies["anomaly_types"].append("WEAPON_DETECTED")
             anomalies["anomaly_details"].insert(
-                0, f"⚠ WEAPON DETECTED: {', '.join(weapon_names)}"
+                0, f"WEAPON DETECTED: {', '.join(weapon_names)}"
             )  # Priority msg
             anomalies["risk_level"] = "critical"
 
@@ -256,18 +342,22 @@ class YOLOAnomalyDetector:
         """
         summary = []
         for det in detections.get("all_boxes", []):
+            category = det.get("category")
+            if category is None:
+                if det["class_id"] == self.PERSON_CLASS:
+                    category = "person"
+                elif det["class_id"] in self.VEHICLE_CLASSES:
+                    category = "vehicle"
+                elif det["class_id"] in self.WEAPON_CLASSES:
+                    category = "weapon"
+                else:
+                    category = "other"
             summary.append(
                 {
                     "class_name": det["class_name"],
                     "confidence": round(det["confidence"], 2),
                     "id": det["id"],
-                    "category": "person"
-                    if det["class_id"] == self.PERSON_CLASS
-                    else "vehicle"
-                    if det["class_id"] in self.VEHICLE_CLASSES
-                    else "weapon"
-                    if det["class_id"] in self.WEAPON_CLASSES
-                    else "other",
+                    "category": category,
                 }
             )
         return summary
@@ -302,84 +392,66 @@ class YOLOAnomalyDetector:
 
         return close_count
 
-    def _check_velocity(self, persons: List[Dict], fps: float) -> int:
-        """
-        Calculate velocity of tracked persons and detect running.
-        Returns number of people running.
-        """
-        running_count = 0
-        velocity_threshold = 150  # pixels per second (adjustable)
-
+    def _track_person_motion(
+        self, persons: List[Dict[str, Any]], timestamp: float
+    ) -> Tuple[int, int]:
+        """Update tracked person motion and return loitering and running counts."""
+        stationary_radius = 50
+        running_speed = 250
         current_ids = set()
+        loitering_count = 0
+        running_count = 0
 
         for person in persons:
             track_id = person.get("id", -1)
             if track_id == -1:
                 continue
-
             current_ids.add(track_id)
             center = person["center"]
-
-            # Update track history
-            # Store (frame_time, x, y)
-            # We use frame_count as efficient proxy for time if FPS is constant,
-            # but here we'll just use simple position history with max length
-
-            if track_id not in self.person_tracks:
-                self.person_tracks[track_id] = []
-
-            self.person_tracks[track_id].append(center)
-
-            # Keep only last 10 frames history (approx 0.3-1.0 sec depending on skip)
-            if len(self.person_tracks[track_id]) > 10:
-                self.person_tracks[track_id].pop(0)
-
-            # Calculate speed if we have enough history (e.g., at least 3 points)
             history = self.person_tracks[track_id]
+            history.append((timestamp, center[0], center[1]))
+            if len(history) > 10:
+                history.pop(0)
+
+            stationary_since, anchor = self.person_stationary_since.get(
+                track_id, (timestamp, center)
+            )
+            displacement = np.hypot(center[0] - anchor[0], center[1] - anchor[1])
+            if displacement > stationary_radius:
+                stationary_since, anchor = timestamp, center
+            self.person_stationary_since[track_id] = (stationary_since, anchor)
+            if timestamp - stationary_since >= self.loiter_threshold:
+                loitering_count += 1
+
             if len(history) >= 3:
-                # Distance moved between first and last point in history
-                start_pos = history[0]
-                end_pos = history[-1]
-                distance = np.sqrt(
-                    (start_pos[0] - end_pos[0]) ** 2 + (start_pos[1] - end_pos[1]) ** 2
-                )
+                start_time, start_x, start_y = history[0]
+                elapsed = timestamp - start_time
+                if elapsed > 0:
+                    speed = np.hypot(center[0] - start_x, center[1] - start_y) / elapsed
+                    self.object_velocities[track_id] = speed
+                    if speed >= running_speed:
+                        running_count += 1
 
-                # Time elapsed (in seconds)
-                # Since we process every Nth frame, we need to account for that
-                # Assuming history points are added every time this function is called (which is every N frames)
-                # This function is called every processed frame
-                # So frames elapsed = (len(history) - 1) * SKIP_FACTOR?
-                # Actually, fps passed to this function is the video FPS.
-                # If we process every 3rd frame, the time between history points is 3/fps.
-                # Let's simplify:
+        for track_id in set(self.person_tracks) - current_ids:
+            self.person_tracks.pop(track_id, None)
+            self.person_stationary_since.pop(track_id, None)
+            self.object_velocities.pop(track_id, None)
 
-                # frames_elapsed = (len(history) - 1) * 3  # Assuming skip=3 (hardcoded for now, should be param)
-                # time_elapsed = frames_elapsed / fps
+        return loitering_count, running_count
 
-                # To be robust, let's just use raw pixels per processed-step
-                # If speed > 50 pixels per step, that's fast.
-
-                speed_per_step = distance / (len(history) - 1)
-
-                # With skip=3, 1 step = 0.1s (at 30fps).
-                # 50px/0.1s = 500px/s.
-                # Let's tune: "Running" typically covers significant screen distance quickly.
-
-                if speed_per_step > 25:  # Tunable threshold for 640x480 video
-                    running_count += 1
-                    self.object_velocities[track_id] = speed_per_step
-
-        # Cleanup old tracks
-        for tid in list(self.person_tracks.keys()):
-            if tid not in current_ids:
-                del self.person_tracks[tid]
-                if tid in self.object_velocities:
-                    del self.object_velocities[tid]
-
-        return running_count
+    def reset_tracking(self):
+        """Reset state before processing a new video source."""
+        self.person_tracks.clear()
+        self.person_stationary_since.clear()
+        self.object_velocities.clear()
+        self.frame_count = 0
 
     def process_frame(
-        self, frame: np.ndarray, draw_detections: bool = True, fps: float = 30.0
+        self,
+        frame: np.ndarray,
+        draw_detections: bool = True,
+        fps: float = 30.0,
+        timestamp: Optional[float] = None,
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
         Process a single frame: detect objects and check anomalies
@@ -396,7 +468,7 @@ class YOLOAnomalyDetector:
         detections = self.detect_objects(frame)
 
         # Check for anomalies
-        anomalies = self.check_anomalies(detections, fps)
+        anomalies = self.check_anomalies(detections, fps, timestamp)
 
         # Combine results
         results = {
@@ -471,7 +543,7 @@ class YOLOAnomalyDetector:
         for det in detections.get("weapons", []):
             x1, y1, x2, y2 = det["bbox"]
             cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 0, 255), 3)
-            label = f"⚠ {det['class_name']} {det['confidence']:.0%}"
+            label = f"WEAPON {det['confidence']:.0%}"
 
             (t_w, t_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(frame_copy, (x1, y1 - 25), (x1 + t_w, y1), (0, 0, 255), -1)
@@ -493,11 +565,11 @@ class YOLOAnomalyDetector:
 
         if anomalies["is_anomaly"]:
             status_color = (0, 0, 200)  # Dark Red
-            status_text = "⚠ ANOMALY DETECTED"
+            status_text = "ANOMALY DETECTED"
             detail_text = ", ".join(anomalies["anomaly_types"])
         else:
             status_color = (0, 150, 0)  # Dark Green
-            status_text = "● NORMAL"
+            status_text = "NORMAL"
             detail_text = "Monitoring..."
 
         # Draw semi-transparent header bar
@@ -588,6 +660,8 @@ class YOLOAnomalyDetector:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+        self.reset_tracking()
+
         # Output video - Use imageio for better browser compatibility
         out = VideoWriter(output_path, fps, width, height)
 
@@ -617,7 +691,7 @@ class YOLOAnomalyDetector:
             # Process frame (skip frames for speed)
             if frame_num % 3 == 0:
                 annotated_frame, results = self.process_frame(
-                    frame, draw_detections=True, fps=fps
+                    frame, draw_detections=True, fps=fps, timestamp=frame_num / fps
                 )
                 last_results = results
                 last_annotated = annotated_frame
@@ -633,7 +707,7 @@ class YOLOAnomalyDetector:
                 else:
                     # First frame fallback
                     annotated_frame, results = self.process_frame(
-                        frame, draw_detections=True, fps=fps
+                        frame, draw_detections=True, fps=fps, timestamp=frame_num / fps
                     )
                     last_results = results
 
@@ -675,8 +749,8 @@ class YOLOAnomalyDetector:
         return stats
 
 
-# Singleton instance for the app
-_detector_instance = None
+# Cache detectors by the settings that affect their behavior.
+_detector_instances: Dict[Tuple[str, str, float, int, float], YOLOAnomalyDetector] = {}
 
 
 def get_yolo_detector(
@@ -685,16 +759,21 @@ def get_yolo_detector(
     confidence_threshold: float = 0.5,
     crowd_threshold: int = 5,
     loiter_threshold_seconds: float = 10.0,
-    confidence: float = 0.5,
 ) -> YOLOAnomalyDetector:
-    """Get or create YOLO detector instance"""
-    global _detector_instance
-    if _detector_instance is None:
-        _detector_instance = YOLOAnomalyDetector(
+    """Get or create a detector matching the requested analysis settings."""
+    settings = (
+        model_size,
+        device,
+        confidence_threshold,
+        crowd_threshold,
+        loiter_threshold_seconds,
+    )
+    if settings not in _detector_instances:
+        _detector_instances[settings] = YOLOAnomalyDetector(
             model_size=model_size,
             device=device,
             confidence_threshold=confidence_threshold,
             crowd_threshold=crowd_threshold,
             loiter_threshold_seconds=loiter_threshold_seconds,
         )
-    return _detector_instance
+    return _detector_instances[settings]

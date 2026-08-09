@@ -409,6 +409,7 @@ def save_video_analysis(filename, frame_count, anomaly_count,
 
 ```python
 import smtplib
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
@@ -437,7 +438,7 @@ def send_anomaly_alert(anomaly_types, details, video_filename=None,
         msg = MIMEMultipart('alternative')
         msg['Subject'] = f"🚨 Anomaly Alert: {video_filename}"
         msg['From'] = config['sender_email']
-        msg['To'] = ', '.join(config['receiver_emails'])
+        msg['To'] = ', '.join(config['admin_emails'])
         
         # Create HTML body
         html = create_html_body(anomaly_types, details, video_id)
@@ -446,7 +447,7 @@ def send_anomaly_alert(anomaly_types, details, video_filename=None,
         # Send email
         with smtplib.SMTP(config['smtp_server'], config['smtp_port']) as server:
             server.starttls()
-            server.login(config['sender_email'], config['sender_password'])
+            server.login(config['sender_email'], os.environ['EMAIL_SMTP_PASSWORD'])
             server.send_message(msg)
         
         return True

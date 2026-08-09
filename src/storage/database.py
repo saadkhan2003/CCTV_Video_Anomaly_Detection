@@ -12,8 +12,13 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 import json
 
-# Database file path
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'anomaly_history.db')
+# Store application data in the project root. Older releases wrote to src/storage;
+# that database is imported once during startup without modifying the source file.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA_DIR = os.getenv("CCTV_DATA_DIR", PROJECT_ROOT)
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "anomaly_history.db")
+LEGACY_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "anomaly_history.db")
 
 
 def get_connection():
@@ -59,10 +64,159 @@ def init_database():
             FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
         )
     ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS analysis_tasks (
+            task_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            progress INTEGER NOT NULL DEFAULT 0,
+            result_json TEXT,
+            error TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS legacy_video_imports (
+            source_path TEXT NOT NULL,
+            legacy_video_id INTEGER NOT NULL,
+            imported_video_id INTEGER NOT NULL,
+            PRIMARY KEY (source_path, legacy_video_id)
+        )
+    ''')
     
     conn.commit()
     conn.close()
+    _import_legacy_database()
     print("✅ Database initialized successfully!")
+
+
+def _import_legacy_database():
+    """Import analyses from the pre-v3 storage location exactly once."""
+    if not os.path.exists(LEGACY_DB_PATH) or os.path.samefile(DB_PATH, LEGACY_DB_PATH):
+        return
+
+    source_path = os.path.abspath(LEGACY_DB_PATH)
+    legacy_conn = sqlite3.connect(LEGACY_DB_PATH)
+    legacy_conn.row_factory = sqlite3.Row
+    conn = get_connection()
+
+    try:
+        legacy_videos = legacy_conn.execute("SELECT * FROM videos ORDER BY id").fetchall()
+        for legacy_video in legacy_videos:
+            already_imported = conn.execute(
+                "SELECT 1 FROM legacy_video_imports WHERE source_path = ? AND legacy_video_id = ?",
+                (source_path, legacy_video["id"]),
+            ).fetchone()
+            if already_imported:
+                continue
+
+            fields = (
+                "filename", "upload_time", "frame_count", "anomaly_count", "anomaly_rate",
+                "processing_time", "threshold_used", "output_video_path", "original_video_path",
+                "avg_anomaly_score", "max_anomaly_score",
+            )
+            conn.execute(
+                f"INSERT INTO videos ({', '.join(fields)}) VALUES ({', '.join('?' for _ in fields)})",
+                tuple(legacy_video[field] for field in fields),
+            )
+            imported_video_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                "INSERT INTO legacy_video_imports VALUES (?, ?, ?)",
+                (source_path, legacy_video["id"], imported_video_id),
+            )
+
+            legacy_events = legacy_conn.execute(
+                "SELECT frame_number, anomaly_score, timestamp_in_video, is_anomaly, bounding_boxes "
+                "FROM anomaly_events WHERE video_id = ?",
+                (legacy_video["id"],),
+            ).fetchall()
+            conn.executemany(
+                "INSERT INTO anomaly_events "
+                "(video_id, frame_number, anomaly_score, timestamp_in_video, is_anomaly, bounding_boxes) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [(imported_video_id, *tuple(event)) for event in legacy_events],
+            )
+        conn.commit()
+    except sqlite3.Error as exc:
+        conn.rollback()
+        print(f"Warning: could not import legacy database: {exc}")
+    finally:
+        legacy_conn.close()
+        conn.close()
+
+
+def create_analysis_task(task_id: str):
+    """Persist a newly queued analysis task."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO analysis_tasks (task_id, status, progress) VALUES (?, 'queued', 0)",
+        (task_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_analysis_task(
+    task_id: str,
+    *,
+    status: Optional[str] = None,
+    progress: Optional[int] = None,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+):
+    """Update the durable task record while retaining unspecified fields."""
+    updates = []
+    values = []
+    if status is not None:
+        updates.append("status = ?")
+        values.append(status)
+    if progress is not None:
+        updates.append("progress = ?")
+        values.append(progress)
+    if result is not None:
+        updates.append("result_json = ?")
+        values.append(json.dumps(result))
+    if error is not None:
+        updates.append("error = ?")
+        values.append(error)
+    if not updates:
+        return
+
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(task_id)
+    conn = get_connection()
+    conn.execute(f"UPDATE analysis_tasks SET {', '.join(updates)} WHERE task_id = ?", values)
+    conn.commit()
+    conn.close()
+
+
+def get_analysis_task(task_id: str) -> Optional[Dict[str, Any]]:
+    """Return a persisted task in the API response shape."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM analysis_tasks WHERE task_id = ?", (task_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+
+    task = dict(row)
+    task["result"] = json.loads(task.pop("result_json")) if task.get("result_json") else None
+    task.pop("created_at", None)
+    task.pop("updated_at", None)
+    return task
+
+
+def mark_interrupted_tasks_failed():
+    """Make restart behavior explicit because in-process background work cannot resume."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE analysis_tasks SET status = 'failed', "
+        "error = 'Server restarted before analysis could finish', updated_at = CURRENT_TIMESTAMP "
+        "WHERE status IN ('queued', 'processing')"
+    )
+    conn.commit()
+    conn.close()
 
 
 def save_video_analysis(

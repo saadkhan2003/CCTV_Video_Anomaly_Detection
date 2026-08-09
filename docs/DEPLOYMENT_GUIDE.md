@@ -111,13 +111,12 @@ pip install -r requirements.txt
 ```
 
 ### Step 3: Configure Email Alerts
-Edit or create `email_config.json`:
+Set `EMAIL_SMTP_PASSWORD` in the service environment, then create `email_config.json`:
 ```json
 {
     "smtp_server": "smtp.gmail.com",
     "smtp_port": 587,
     "sender_email": "security@university.edu",
-    "sender_password": "app-password-here",
     "admin_emails": ["guard1@university.edu", "security-head@university.edu"]
 }
 ```
