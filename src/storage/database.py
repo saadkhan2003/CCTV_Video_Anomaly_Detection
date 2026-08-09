@@ -15,9 +15,7 @@ import json
 # Store application data in the project root. Older releases wrote to src/storage;
 # that database is imported once during startup without modifying the source file.
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.getenv("CCTV_DATA_DIR", PROJECT_ROOT)
-os.makedirs(DATA_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, "anomaly_history.db")
+DB_PATH = os.path.join(PROJECT_ROOT, "anomaly_history.db")
 LEGACY_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "anomaly_history.db")
 
 
