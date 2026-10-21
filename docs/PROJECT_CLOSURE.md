@@ -21,7 +21,7 @@ The CCTV Video Anomaly Detection System project has been successfully completed 
 
 **Budget**: [Budget Information]
 
-**Team Size**: [Team Size]
+**Team Size**: 1 (Muhammad Saad Khan, sole author)
 
 ### Key Achievements
 
@@ -249,7 +249,7 @@ All required documentation has been created and delivered:
 - Complete API reference
 - Code architecture documentation
 - Configuration guide with all parameters
-- Developer guide for contributors
+- Developer guide for the author, Muhammad Saad Khan
 
 **Operational Documentation** ✅
 - Deployment guide for various environments
@@ -377,7 +377,7 @@ The following features were identified as valuable but deferred to future releas
 ### 1. Immediate Actions (Before Production)
 
 **Critical** (Must Do):
-- [ ] Conduct security audit by external team
+- [ ] Conduct a security audit by an external reviewer
 - [ ] Perform load testing at expected production scale
 - [ ] Set up monitoring and alerting (Prometheus, Grafana)
 - [ ] Configure automated backups
@@ -402,7 +402,7 @@ The following features were identified as valuable but deferred to future releas
 **Staffing**:
 - 1 System Administrator for infrastructure management
 - 1 Developer for bug fixes and minor enhancements (part-time)
-- Security team involvement for quarterly audits
+- Quarterly security review by Muhammad Saad Khan
 
 **Monitoring**:
 - Set up 24/7 system monitoring
@@ -453,10 +453,7 @@ The following features were identified as valuable but deferred to future releas
 
 | Role | Name | Email | Phone | Availability |
 |------|------|-------|-------|--------------|
-| System Admin | [Name] | admin@company.com | [Phone] | 24/7 |
-| Lead Developer | [Name] | dev@company.com | [Phone] | Business hours |
-| Security Lead | [Name] | security@company.com | [Phone] | On-call |
-| Project Manager | [Name] | pm@company.com | [Phone] | Business hours |
+| Author | Muhammad Saad Khan | [GitHub: saadkhan2003](https://github.com/saadkhan2003) | [Phone] | — |
 
 ### 3. Support Resources
 
@@ -613,23 +610,8 @@ The following features were identified as valuable but deferred to future releas
 
 This project closure document confirms that the CCTV Video Anomaly Detection System has been completed according to specifications and is ready for production deployment.
 
-**Project Manager**:
-- Name: ___________________________
-- Signature: ___________________________
-- Date: ___________________________
-
-**Technical Lead**:
-- Name: ___________________________
-- Signature: ___________________________
-- Date: ___________________________
-
-**Stakeholder/Sponsor**:
-- Name: ___________________________
-- Signature: ___________________________
-- Date: ___________________________
-
-**Quality Assurance**:
-- Name: ___________________________
+**Author** (Muhammad Saad Khan, sole author):
+- Name: Muhammad Saad Khan
 - Signature: ___________________________
 - Date: ___________________________
 

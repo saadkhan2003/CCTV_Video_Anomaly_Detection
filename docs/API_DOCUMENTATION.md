@@ -68,12 +68,12 @@ Returns the live stream monitoring page.
 
 ### 2. Video Analysis
 
-#### POST `/api/analyze`
+#### POST `/analyze-yolo`
 Upload and analyze a video file for anomalies.
 
 **Request**:
 ```http
-POST /api/analyze
+POST /analyze-yolo
 Content-Type: multipart/form-data
 
 Parameters:
@@ -84,7 +84,7 @@ Parameters:
 
 **Example**:
 ```bash
-curl -X POST "http://localhost:8000/api/analyze" \
+curl -X POST "http://localhost:8000/analyze-yolo" \
   -F "file=@surveillance.mp4" \
   -F "crowd_threshold=5" \
   -F "confidence=0.6"
@@ -106,7 +106,7 @@ curl -X POST "http://localhost:8000/api/analyze" \
 
 ---
 
-#### GET `/api/task/{task_id}`
+#### GET `/tasks/{task_id}`
 Get the status and progress of an analysis task.
 
 **Parameters**:
@@ -160,14 +160,14 @@ Get the status and progress of an analysis task.
 
 ### 3. Live Stream
 
-#### GET `/api/live-stream`
-Start real-time anomaly detection on a video stream.
+#### POST `/live/start`
+Start real-time anomaly detection on a video stream. The picture is `GET /live/feed/{stream_id}` and status is `GET /live/status/{stream_id}`.
 
 **Parameters (Query)**:
 - `source` (string): 
   - `"0"` or `"webcam"` for webcam
   - RTSP URL for IP camera (e.g., `rtsp://admin:pass@192.168.1.100:554/stream1`)
-- `crowd_threshold` (int, default: 5): Crowd detection threshold
+- `crowd_threshold` (int, default: 3): Crowd detection threshold
 - `confidence` (float, default: 0.5): Detection confidence
 
 **Response**: Server-Sent Events (SSE) stream
@@ -182,7 +182,7 @@ Start real-time anomaly detection on a video stream.
 **Example Connection (JavaScript)**:
 ```javascript
 const eventSource = new EventSource(
-  '/api/live-stream?source=rtsp://192.168.1.100:554/stream1&crowd_threshold=5'
+  '/live/feed/main'
 );
 
 eventSource.addEventListener('frame', (event) => {
@@ -213,7 +213,7 @@ eventSource.addEventListener('stats', (event) => {
 
 ### 4. Database Operations
 
-#### GET `/api/videos`
+#### GET `/history`
 Retrieve all analyzed videos from the database.
 
 **Parameters (Query)**:
@@ -245,7 +245,7 @@ Retrieve all analyzed videos from the database.
 
 ---
 
-#### GET `/api/videos/{video_id}`
+#### GET `/history/{video_id}`
 Get detailed information about a specific video.
 
 **Parameters**:
@@ -274,7 +274,7 @@ Get detailed information about a specific video.
 
 ---
 
-#### DELETE `/api/videos/{video_id}`
+#### DELETE `/history/{video_id}`
 Delete a video and its analysis results.
 
 **Parameters**:
@@ -294,17 +294,17 @@ Delete a video and its analysis results.
 
 ---
 
-#### GET `/api/search`
+#### GET `/history`
 Search videos by filename or date range.
 
 **Parameters (Query)**:
-- `query` (string, optional): Search term for filename
+- `filename` (string, optional): Search term for filename
 - `start_date` (string, optional): ISO format date (e.g., `2026-03-01`)
 - `end_date` (string, optional): ISO format date
 
 **Example**:
 ```bash
-curl "http://localhost:8000/api/search?query=lobby&start_date=2026-03-01"
+curl "http://localhost:8000/history?filename=lobby&start_date=2026-03-01"
 ```
 
 **Response**:
@@ -327,8 +327,8 @@ curl "http://localhost:8000/api/search?query=lobby&start_date=2026-03-01"
 
 ---
 
-#### GET `/api/statistics`
-Get aggregated statistics across all analyzed videos.
+#### `get_statistics()` in `src/storage/database.py`
+Get aggregated statistics across all analyzed videos. This helper is not registered as an HTTP route.
 
 **Response**:
 ```json
@@ -361,7 +361,7 @@ Get aggregated statistics across all analyzed videos.
 
 ### 5. System Health
 
-#### GET `/api/health`
+#### GET `/health`
 Check API health status.
 
 **Response**:
@@ -456,12 +456,12 @@ import time
 # 1. Upload video for analysis
 files = {'file': open('surveillance.mp4', 'rb')}
 data = {'crowd_threshold': 5, 'confidence': 0.6}
-response = requests.post('http://localhost:8000/api/analyze', files=files, data=data)
+response = requests.post('http://localhost:8000/analyze-yolo', files=files, data=data)
 task_id = response.json()['task_id']
 
 # 2. Poll for progress
 while True:
-    response = requests.get(f'http://localhost:8000/api/task/{task_id}')
+    response = requests.get(f'http://localhost:8000/tasks/{task_id}')
     task_data = response.json()
     
     if task_data['status'] == 'completed':
@@ -476,12 +476,13 @@ while True:
 
 # 3. Get video details
 video_id = task_data['result']['video_id']
-response = requests.get(f'http://localhost:8000/api/videos/{video_id}')
+response = requests.get(f'http://localhost:8000/history/{video_id}')
 video_data = response.json()
 print(f"Anomaly rate: {video_data['anomaly_rate'] * 100:.2f}%")
 
 # 4. Get statistics
-response = requests.get('http://localhost:8000/api/statistics')
+# get_statistics() in src/storage/database.py is not an HTTP route
+response = requests.get('http://localhost:8000/history')
 stats = response.json()
 print(f"Total videos analyzed: {stats['total_videos']}")
 ```
@@ -496,7 +497,7 @@ async function analyzeVideo(file, crowdThreshold = 5) {
   formData.append('crowd_threshold', crowdThreshold);
   formData.append('confidence', 0.6);
 
-  const response = await fetch('/api/analyze', {
+  const response = await fetch('/analyze-yolo', {
     method: 'POST',
     body: formData
   });
@@ -507,13 +508,13 @@ async function analyzeVideo(file, crowdThreshold = 5) {
 
 // Check task status
 async function checkTaskStatus(taskId) {
-  const response = await fetch(`/api/task/${taskId}`);
+  const response = await fetch(`/tasks/${taskId}`);
   return await response.json();
 }
 
 // Get all videos
 async function getAllVideos() {
-  const response = await fetch('/api/videos');
+  const response = await fetch('/history');
   return await response.json();
 }
 ```
@@ -544,7 +545,7 @@ This would allow:
 - Enhanced anomaly detection rules
 
 ### Version 2.0.0
-- YOLOv8 integration
+- YOLO11 integration
 - Database storage
 - Email alerts
 
@@ -565,4 +566,4 @@ For API issues or questions:
 
 ## License
 
-MIT License - See LICENSE file for details
+Apache License 2.0 - See LICENSE file for details

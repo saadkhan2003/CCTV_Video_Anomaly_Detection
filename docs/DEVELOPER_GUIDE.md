@@ -161,7 +161,7 @@ pre-commit>=3.3.0
 ├── .env                        # Environment variables
 ├── email_config.json          # Email configuration
 ├── README.md                  # Project overview
-├── LICENSE                    # MIT License
+├── LICENSE                    # Apache License 2.0
 │
 ├── src/                       # Source code
 │   ├── __init__.py
@@ -217,7 +217,7 @@ pre-commit>=3.3.0
 #### Key Classes
 
 ```python
-class YOLODetector:
+class YOLOAnomalyDetector:
     """Main detection class using YOLOv11"""
     
     def __init__(self, model_size='s', device='cpu', 
@@ -462,12 +462,12 @@ def send_anomaly_alert(anomaly_types, details, video_filename=None,
 #### Key Endpoints
 
 ```python
-@app.post("/api/analyze")
+@app.post("/analyze-yolo")
 async def analyze_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     crowd_threshold: int = Query(5),
-    confidence: float = Query(0.6)
+    confidence: float = Query(0.5)
 ):
     """
     Upload and analyze video
@@ -504,7 +504,7 @@ async def analyze_video(
         'message': 'Analysis started'
     }
 
-@app.get("/api/task/{task_id}")
+@app.get("/tasks/{task_id}")
 async def get_task_status(task_id: str):
     """
     Get analysis task status
@@ -654,10 +654,10 @@ class DetectionZone:
         return anomalies
 ```
 
-#### Step 2: Integrate into YOLODetector
+#### Step 2: Integrate into YOLOAnomalyDetector
 
 ```python
-class YOLODetector:
+class YOLOAnomalyDetector:
     def __init__(self, ..., zones=None):
         # ... existing code ...
         self.zones = zones or []
@@ -756,7 +756,7 @@ def processVideo(videoPath,outputPath):
 
 | Type | Convention | Example |
 |------|-----------|---------|
-| Classes | PascalCase | `YOLODetector` |
+| Classes | PascalCase | `YOLOAnomalyDetector` |
 | Functions | snake_case | `process_video()` |
 | Variables | snake_case | `video_path` |
 | Constants | UPPER_CASE | `MAX_FILE_SIZE` |

@@ -241,7 +241,7 @@ MAX_FILE_SIZE=1000
   "smtp_port": 587,
   "sender_email": "security@company.com",
   "admin_emails": [
-    "security-team@company.com",
+    "security@company.com",
     "operations@company.com"
   ],
   "enabled": true
@@ -689,7 +689,7 @@ for video in /videos/*.mp4; do
     curl -X POST \
         -F "file=@$video" \
         -F "crowd_threshold=5" \
-        http://localhost:8000/api/analyze
+        http://localhost:8000/analyze-yolo
     
     # Wait for completion
     sleep 60

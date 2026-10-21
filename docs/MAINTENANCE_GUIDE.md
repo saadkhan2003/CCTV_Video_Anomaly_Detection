@@ -588,13 +588,13 @@ sudo systemctl restart cctv-detection
 ```python
 # test_new_model.py
 
-from src.detection.yolo_detector import YOLODetector
+from src.detection.yolo_detector import YOLOAnomalyDetector
 import time
 import numpy as np
 
 def benchmark_model(model_path, num_iterations=100):
     """Benchmark model performance"""
-    detector = YOLODetector(model_path=model_path)
+    detector = YOLOAnomalyDetector(model_size="s")
     
     # Create test frame
     frame = np.random.randint(0, 255, (640, 480, 3), dtype=np.uint8)

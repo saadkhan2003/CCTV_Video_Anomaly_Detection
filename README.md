@@ -5,7 +5,7 @@
 ![OpenVINO](https://img.shields.io/badge/Inference-OpenVINO-purple)
 ![FastAPI](https://img.shields.io/badge/Backend-FastAPI-teal)
 ![Version](https://img.shields.io/badge/Version-3.0.0-orange)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+![License](https://img.shields.io/badge/License-Apache_2.0-yellow)
 
 A high-performance, AI-powered video anomaly detection system designed for CCTV surveillance. Leverages YOLOv11 with OpenVINO optimization for real-time detection on standard CPUs, featuring a modern web interface and comprehensive alerting capabilities.
 
@@ -88,8 +88,8 @@ Comprehensive documentation is available in the `/docs` folder:
 
 1.  **Clone the repository**
     ```bash
-    git clone https://github.com/yourusername/cctv-anomaly-detection.git
-    cd cctv-anomaly-detection
+    git clone https://github.com/saadkhan2003/CCTV_Video_Anomaly_Detection.git
+    cd CCTV_Video_Anomaly_Detection
     ```
 
 2.  **Create virtual environment** (recommended)
@@ -119,7 +119,7 @@ Comprehensive documentation is available in the `/docs` folder:
 3.  **Upload and analyze a video**
     - Navigate to "Analyze" tab
     - Upload video file (MP4, AVI, MOV, MKV)
-    - Set crowd threshold (default: 3)
+    - Set crowd threshold (default: 5)
     - Click "Start Analysis"
     - Monitor progress and view results
 
@@ -190,7 +190,7 @@ Press `Ctrl+C` in the test_streams terminal to stop all fake cameras.
 - Max file size: 500 MB (configurable)
 
 **Step 2**: Configure Settings
-- **Crowd Threshold**: Number of people to trigger alert (default: 3)
+- **Crowd Threshold**: Number of people to trigger alert (default: 5)
 - **Confidence**: Detection confidence level 0.0-1.0 (default: 0.5)
 
 **Step 3**: Start Analysis
@@ -250,7 +250,7 @@ DEVICE=cpu            # cpu, cuda, mps
 CONFIDENCE_THRESHOLD=0.5
 
 # Anomaly Thresholds
-CROWD_THRESHOLD=3
+CROWD_THRESHOLD=5
 LOITER_THRESHOLD=10.0
 
 # Live stream timeout (ms) - increase for slow networks / flaky IP cameras
@@ -351,28 +351,27 @@ The system provides a RESTful API for integration with other applications.
 
 ```bash
 # Health check
-GET /api/health
+GET /health
 
 # Upload and analyze video
-POST /api/analyze
+POST /analyze-yolo
   - file: video file
   - crowd_threshold: int
   - confidence: float
 
 # Get task status
-GET /api/task/{task_id}
+GET /tasks/{task_id}
 
 # Get all videos
-GET /api/videos
+GET /history
 
 # Get specific video
-GET /api/videos/{video_id}
+GET /history/{video_id}
 
 # Search videos
-GET /api/search?query=...
+GET /history?filename=...
 
-# Get statistics
-GET /api/statistics
+# Statistics helper in src/storage/database.py (get_statistics; not an HTTP route)
 
 # Live stream controls
 POST /live/start      # Start stream {source, stream_id, crowd_threshold}
@@ -524,7 +523,7 @@ For more troubleshooting, see [USER_MANUAL.md](docs/USER_MANUAL.md#troubleshooti
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for:
+This project is the solo work of Muhammad Saad Khan ([saadkhan2003](https://github.com/saadkhan2003)). See the [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for:
 
 - Development environment setup
 - Code style guidelines
@@ -546,7 +545,7 @@ We welcome contributions! Please see our [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUI
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ### Third-Party Licenses
 
@@ -561,11 +560,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Ultralytics** for YOLOv11 model
 - **Intel** for OpenVINO toolkit
-- **FastAPI** team for excellent web framework
+- **FastAPI** for the web framework
 - **ByteTrack** for tracking algorithm
 - **Docker mediamtx** for RTSP test server
 - **Pexels** for free stock test videos
-- All open-source contributors
+- **Muhammad Saad Khan** ([saadkhan2003](https://github.com/saadkhan2003)), sole author of this project
 
 ---
 
@@ -574,8 +573,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ### Getting Help
 
 - 📖 **Documentation**: Check `/docs` folder
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/yourusername/cctv-anomaly-detection/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/yourusername/cctv-anomaly-detection/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/saadkhan2003/CCTV_Video_Anomaly_Detection/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/saadkhan2003/CCTV_Video_Anomaly_Detection/discussions)
 - 📧 **Email**: support@yourcompany.com
 
 ### Professional Support
