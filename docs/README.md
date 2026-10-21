@@ -148,7 +148,7 @@ This folder contains comprehensive documentation for the CCTV Video Anomaly Dete
 ### 6. DEVELOPER_GUIDE.md
 **Location**: `/docs/DEVELOPER_GUIDE.md`  
 **Pages**: ~45  
-**Audience**: Developers, contributors
+**Audience**: Muhammad Saad Khan
 
 **What's Inside**:
 - Development environment setup
@@ -210,7 +210,7 @@ This folder contains comprehensive documentation for the CCTV Video Anomaly Dete
 ### 9. PROJECT_CLOSURE.md
 **Location**: `/docs/PROJECT_CLOSURE.md`  
 **Pages**: ~50  
-**Audience**: Stakeholders, management, team
+**Audience**: Muhammad Saad Khan
 
 **What's Inside**:
 - Project completion summary
@@ -426,7 +426,7 @@ Found an error or have suggestions?
 
 ## 📄 License
 
-All documentation is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+All documentation is licensed under the Apache License, Version 2.0. See [LICENSE](../LICENSE).
 
 You are free to:
 - Share — copy and redistribute the material

@@ -264,7 +264,7 @@ pip install --upgrade -r requirements.txt
 
 ## Contact & Support
 
-For technical support, contact the system administrator or development team.
+For technical support, contact Muhammad Saad Khan ([saadkhan2003](https://github.com/saadkhan2003)).
 
 **Project:** CCTV Video Anomaly Detection System  
 **Version:** 1.0  

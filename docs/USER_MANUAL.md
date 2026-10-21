@@ -577,7 +577,7 @@ python app.py --port 8080
 
 **Solution**:
 - Check internet connection
-- Download manually: https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov11s.pt
+- Download manually: https://github.com/ultralytics/assets/releases/download/v0.0.0/yolo11s.pt
 - Place in project root directory
 
 ---
@@ -742,7 +742,7 @@ logging.basicConfig(level=logging.DEBUG)
 A: It processes video but doesn't record by default. Analyzed videos are saved if you choose "Save Output Video".
 
 **Q: Can I use this commercially?**  
-A: Yes, MIT license allows commercial use. Check YOLOv11 license separately.
+A: Yes, the Apache License 2.0 allows commercial use. Check YOLOv11 license separately.
 
 **Q: Does it work offline?**  
 A: Yes, after initial model download. No internet required for analysis.

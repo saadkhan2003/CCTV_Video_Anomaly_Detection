@@ -142,14 +142,14 @@ def test_video():
 
 ```python
 import pytest
-from src.detection.yolo_detector import YOLODetector
+from src.detection.yolo_detector import YOLOAnomalyDetector
 
-class TestYOLODetector:
+class TestYOLOAnomalyDetector:
     
     @pytest.fixture
     def detector(self):
         """Initialize detector for tests"""
-        return YOLODetector(
+        return YOLOAnomalyDetector(
             model_size='n',
             device='cpu',
             confidence_threshold=0.5
@@ -213,7 +213,7 @@ class TestYOLODetector:
     ])
     def test_confidence_thresholds(self, confidence, expected):
         """Test different confidence thresholds"""
-        detector = YOLODetector(
+        detector = YOLOAnomalyDetector(
             model_size='n',
             confidence_threshold=confidence
         )
@@ -411,7 +411,7 @@ pytest --cov=src tests/
 pytest -v tests/
 
 # Run specific test
-pytest tests/test_detection.py::TestYOLODetector::test_crowd_detection
+pytest tests/test_detection.py::TestYOLOAnomalyDetector::test_crowd_detection
 ```
 
 ---
@@ -439,7 +439,7 @@ class TestAPI:
     
     def test_health_endpoint(self):
         """Test health check endpoint"""
-        response = client.get("/api/health")
+        response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
         assert "status" in data
@@ -449,7 +449,7 @@ class TestAPI:
         """Test video upload endpoint"""
         with open(test_video, 'rb') as f:
             response = client.post(
-                "/api/analyze",
+                "/analyze-yolo",
                 files={"file": ("test.mp4", f, "video/mp4")},
                 data={"crowd_threshold": 5, "confidence": 0.6}
             )
@@ -464,14 +464,14 @@ class TestAPI:
         # Upload video first
         with open('test_video.mp4', 'rb') as f:
             response = client.post(
-                "/api/analyze",
+                "/analyze-yolo",
                 files={"file": ("test.mp4", f, "video/mp4")}
             )
         
         task_id = response.json()["task_id"]
         
         # Check status
-        response = client.get(f"/api/task/{task_id}")
+        response = client.get(f"/tasks/{task_id}")
         assert response.status_code == 200
         data = response.json()
         assert "status" in data
@@ -479,7 +479,7 @@ class TestAPI:
     
     def test_get_all_videos(self):
         """Test getting all videos"""
-        response = client.get("/api/videos")
+        response = client.get("/history")
         assert response.status_code == 200
         data = response.json()
         assert "videos" in data
@@ -487,7 +487,7 @@ class TestAPI:
     
     def test_get_video_by_id(self):
         """Test getting specific video"""
-        response = client.get("/api/videos/1")
+        response = client.get("/history/1")
         
         # Either found or not found
         assert response.status_code in [200, 404]
@@ -499,19 +499,20 @@ class TestAPI:
     
     def test_delete_video(self):
         """Test deleting video"""
-        response = client.delete("/api/videos/1")
+        response = client.delete("/history/1")
         assert response.status_code in [200, 404]
     
     def test_search_videos(self):
         """Test video search"""
-        response = client.get("/api/search?query=test")
+        response = client.get("/history?filename=test")
         assert response.status_code == 200
         data = response.json()
         assert "results" in data
     
     def test_statistics_endpoint(self):
         """Test statistics endpoint"""
-        response = client.get("/api/statistics")
+        # get_statistics() in src/storage/database.py is not an HTTP route
+        response = client.get("/history")
         assert response.status_code == 200
         data = response.json()
         assert "total_videos" in data
@@ -533,7 +534,7 @@ class TestLiveStream:
     
     def test_live_stream_webcam(self):
         """Test live stream with webcam"""
-        with client.stream("GET", "/api/live-stream?source=0") as response:
+        with client.stream("GET", "/live/feed/main") as response:
             assert response.status_code == 200
             
             # Read first few events
@@ -547,7 +548,7 @@ class TestLiveStream:
     
     def test_live_stream_invalid_source(self):
         """Test live stream with invalid source"""
-        response = client.get("/api/live-stream?source=invalid://url")
+        response = client.get("/live/feed/invalid")
         assert response.status_code in [400, 503]
 ```
 
@@ -559,28 +560,29 @@ class TestLiveStream:
 
 ```bash
 # Health check
-curl http://localhost:8000/api/health
+curl http://localhost:8000/health
 
 # Upload video
-curl -X POST http://localhost:8000/api/analyze \
+curl -X POST http://localhost:8000/analyze-yolo \
   -F "file=@test_video.mp4" \
   -F "crowd_threshold=5" \
   -F "confidence=0.6"
 
 # Get task status
-curl http://localhost:8000/api/task/{task_id}
+curl http://localhost:8000/tasks/{task_id}
 
 # Get all videos
-curl http://localhost:8000/api/videos
+curl http://localhost:8000/history
 
 # Search videos
-curl "http://localhost:8000/api/search?query=test"
+curl "http://localhost:8000/history?filename=test"
 
 # Get statistics
-curl http://localhost:8000/api/statistics
+# get_statistics() in src/storage/database.py is not an HTTP route
+curl http://localhost:8000/history
 
 # Delete video
-curl -X DELETE http://localhost:8000/api/videos/1
+curl -X DELETE http://localhost:8000/history/1
 ```
 
 ### Using Python Requests
@@ -592,7 +594,7 @@ import time
 # Upload video
 with open('test_video.mp4', 'rb') as f:
     response = requests.post(
-        'http://localhost:8000/api/analyze',
+        'http://localhost:8000/analyze-yolo',
         files={'file': f},
         data={'crowd_threshold': 5, 'confidence': 0.6}
     )
@@ -602,7 +604,7 @@ print(f"Task ID: {task_id}")
 
 # Poll for results
 while True:
-    response = requests.get(f'http://localhost:8000/api/task/{task_id}')
+    response = requests.get(f'http://localhost:8000/tasks/{task_id}')
     task = response.json()
     
     print(f"Status: {task['status']}, Progress: {task['progress']}%")
@@ -628,14 +630,14 @@ while True:
 
 ```python
 import pytest
-from src.detection.yolo_detector import YOLODetector
+from src.detection.yolo_detector import YOLOAnomalyDetector
 import numpy as np
 
 class TestPerformance:
     
     @pytest.fixture
     def detector(self):
-        return YOLODetector(model_size='s', device='cpu')
+        return YOLOAnomalyDetector(model_size='s', device='cpu')
     
     @pytest.fixture
     def frame(self):
@@ -673,24 +675,25 @@ class CCTVUser(HttpUser):
     @task(3)
     def get_videos(self):
         """Repeatedly fetch videos"""
-        self.client.get("/api/videos")
+        self.client.get("/history")
     
     @task(2)
     def get_statistics(self):
         """Fetch statistics"""
-        self.client.get("/api/statistics")
+        # get_statistics() in src/storage/database.py is not an HTTP route
+        self.client.get("/history")
     
     @task(1)
     def search_videos(self):
         """Search videos"""
-        self.client.get("/api/search?query=test")
+        self.client.get("/history?filename=test")
     
     @task(1)
     def upload_video(self):
         """Upload small test video"""
         with open('test_video.mp4', 'rb') as f:
             self.client.post(
-                "/api/analyze",
+                "/analyze-yolo",
                 files={"file": ("test.mp4", f, "video/mp4")},
                 data={"crowd_threshold": 5}
             )
